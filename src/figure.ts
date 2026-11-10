@@ -18,7 +18,7 @@ export function foldFigure(targets: TargetResult[], o: FigOpts): string {
   const clusterW = groups.length * barW + (groups.length - 1) * gap
   const left = 64, right = 16, top = o.title ? 62 : 44, bottom = 64 + (o.caption ? 30 : 0)
   const plotW = Math.max(clusterW * targets.length + clusterGap * Math.max(0, targets.length - 1), 160)
-  const width = Math.max(o.width ?? 0, left + plotW + right)
+  const width = Math.max(o.width ?? 0, o.caption ? 700 : 0, left + plotW + right)
   const height = 340 + (o.caption ? 30 : 0)
   const plotH = height - top - bottom
 
@@ -77,7 +77,7 @@ export function foldFigure(targets: TargetResult[], o: FigOpts): string {
         const jx = cx + ((i % 3) - 1) * 6 + (b.pts.length > 3 ? (Math.floor(i / 3) % 2 ? 3 : -3) : 0)
         s.push(`<circle cx="${jx}" cy="${Y(v)}" r="3.4" fill="${o.kind === 'bar' ? (o.bg ?? '#ffffff') : c}" stroke="${o.kind === 'bar' ? ink : (o.bg ?? '#ffffff')}" stroke-width="1"/>`)
       })
-      if (b.stars) s.push(`<text x="${cx}" y="${Y(Math.max(b.hi, ...b.pts)) - 7}" font-size="${b.stars === 'ns' ? 10 : 14}" font-weight="600" text-anchor="middle" fill="${ink}">${b.stars}</text>`)
+      if (b.stars) s.push(`<text x="${cx}" y="${Y(Math.max(b.hi, ...b.pts, 0)) - 7}" font-size="${b.stars === 'ns' ? 10 : 14}" font-weight="600" text-anchor="middle" fill="${ink}">${b.stars}</text>`)
     })
   })
   if (o.caption) s.push(`<text x="${left}" y="${height - 14}" font-size="10.5" fill="${muted}">Bars: mean fold change; dots: biological replicates; whiskers: 95% CI vs ${esc(o.control)} (control: 95% CI of its mean). * p&lt;0.05, ** p&lt;0.01, *** p&lt;0.001.</text>`)

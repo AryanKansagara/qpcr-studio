@@ -183,8 +183,8 @@ export function RefsTab({ p, a }: { p: Project; a: Analysis }) {
             <h3 className="h5">geNorm M</h3>
             <p className="muted small">Mean pairwise variation of each gene with all others, over {st.samples} samples. Below 0.5 is stable for homogeneous samples (cell lines), below 1.0 for tissues.</p>
             <svg viewBox={`0 0 320 ${st.genes.length * 30 + 26}`} className="hbar" role="img" aria-label="geNorm M values">
-              {st.genorm.ranking.map((g, i) => { const m = st.genorm.m[g]; const w = (m / maxM) * 200; return <g key={g} transform={`translate(0 ${i * 30})`}><text x="64" y="18" textAnchor="end" fontSize="12" fontStyle="italic" fill={cols.ink}>{g}</text><rect x="72" y="5" width={w} height="18" rx="2" fill={m < 0.5 ? '#009E73' : m < 1 ? '#E69F00' : '#D55E00'} /><text x={78 + w} y="18" fontSize="11" fill={cols.ink}>{m.toFixed(3)}</text></g> })}
               <line x1={72 + (0.5 / maxM) * 200} x2={72 + (0.5 / maxM) * 200} y1="0" y2={st.genes.length * 30} stroke={cols.muted} strokeDasharray="3 3" />
+              {st.genorm.ranking.map((g, i) => { const m = st.genorm.m[g]; const w = (m / maxM) * 200; return <g key={g} transform={`translate(0 ${i * 30})`}><text x="64" y="18" textAnchor="end" fontSize="12" fontStyle="italic" fill={cols.ink}>{g}</text><rect x="72" y="5" width={w} height="18" rx="2" fill={m < 0.5 ? '#009E73' : m < 1 ? '#E69F00' : '#D55E00'} /><text x={78 + Math.max(w, (0.5 / maxM) * 200 + 4)} y="18" fontSize="11" fill={cols.ink}>{m.toFixed(3)}</text></g> })}
               <text x={72 + (0.5 / maxM) * 200} y={st.genes.length * 30 + 16} fontSize="10" textAnchor="middle" fill={cols.muted}>0.5</text>
             </svg>
             {st.genorm.v.length > 0 && <>

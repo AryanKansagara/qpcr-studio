@@ -40,7 +40,7 @@ export default function ProjectView({ id, tab }: { id: string; tab: string }) {
         <div>
           <p className="eyebrow"><Link href="/app">Experiments</Link> / {p.registry.status}</p>
           <h1 className="proj-title">
-            <input aria-label="Experiment name" defaultValue={p.name} key={p.name} onBlur={e => { const v = e.target.value.trim(); if (v && v !== p.name) void saveProject({ ...p, name: v }) }} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+            <input aria-label="Experiment name" size={Math.min(48, Math.max(8, p.name.length + 1))} defaultValue={p.name} key={p.name} onBlur={e => { const v = e.target.value.trim(); if (v && v !== p.name) void saveProject({ ...p, name: v }) }} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
             {p.sampleId && <SyntheticBadge />}
           </h1>
           <p className="muted small">{p.plates.length} plate{p.plates.length === 1 ? '' : 's'} · {a.counts.wells} wells · {a.samples.length} samples · {p.settings.method === 'pfaffl' ? 'Pfaffl (efficiency-corrected)' : 'Livak ΔΔCq'} · refs {p.settings.refs.join(' + ') || 'not set'}</p>
