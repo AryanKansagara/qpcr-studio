@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" data-default-mode="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>qPCR Studio: from raw Cq to publication-ready relative expression</title>
+    <meta name="description" content="Import CFX, QuantStudio, LightCycler or Rotor-Gene exports. Reference-gene stability, efficiency-corrected (Pfaffl) normalisation, outlier and NTC checks, statistics on ΔCq, MIQE checklist, figures and a methods paragraph." />
+    <meta name="theme-color" content="#f5f2ee" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171615'/><circle cx='11' cy='11' r='4' fill='%235ec962'/><circle cx='21' cy='11' r='4' fill='%2321918c'/><circle cx='11' cy='21' r='4' fill='%233b528b'/><circle cx='21' cy='21' r='4' fill='%23fde725'/></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=IBM+Plex+Serif:wght@400;500&display=swap" rel="stylesheet" />
+    <script>
+      (function () {
+        var q = new URLSearchParams(location.search).get('mode')
+        var m = q === 'light' || q === 'dark' ? q : localStorage.getItem('themeMode')
+        document.documentElement.dataset.themeMode = m === 'light' || m === 'dark' ? m : document.documentElement.dataset.defaultMode
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
