@@ -102,7 +102,7 @@ export default function PlateTab({ p, a }: { p: Project; a: Analysis }) {
           <div className="row gap-sm wrap">
             <button type="button" className="btn primary sm" onClick={() => setImporting(true)}>Import plate</button>
             <button type="button" className="btn ghost sm" onClick={async () => {
-              const fresh: Plate = { id: crypto.randomUUID(), name: `Plate ${p.plates.length + 1}`, format: 96, instrument: p.meta.instrument, runDate: new Date().toISOString().slice(0, 10), wells: [] }
+              const fresh: Plate = { id: crypto.randomUUID(), name: `Plate ${p.plates.length + 1}`, format: 96, instrument: p.meta.instrument, runDate: new Date().toLocaleDateString('en-CA'), wells: [] }
               await saveProject({ ...p, plates: [...p.plates, fresh] }); setPlateId(fresh.id); setSel(new Set())
             }}>Blank plate map</button>
           </div>

@@ -34,7 +34,7 @@ export function ImportWizard({ open, onClose, p }: { open: boolean; onClose(): v
   const [defaultTarget, setDefaultTarget] = useState('')
   const [numbered, setNumbered] = useState(false)
   const [plateName, setPlateName] = useState('')
-  const [runDate, setRunDate] = useState(new Date().toISOString().slice(0, 10))
+  const [runDate, setRunDate] = useState(new Date().toLocaleDateString('en-CA'))
   const [paste, setPaste] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

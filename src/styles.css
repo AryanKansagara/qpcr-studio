@@ -182,7 +182,7 @@ details.more[open] > summary { margin-bottom: .6rem; }
 .toast button { background: none; border: 0; color: inherit; font-weight: 600; text-decoration: underline; }
 .toast .toast-x { text-decoration: none; opacity: .7; font-size: 1.2rem; }
 .toast.error { background: var(--bad); color: #fff; }
-.modal { border: 1px solid var(--line); border-radius: var(--r-lg); padding: 0; width: min(520px, 94vw); background: var(--surface); color: var(--text); box-shadow: var(--shadow-strong); }
+.modal { text-align: left; border: 1px solid var(--line); border-radius: var(--r-lg); padding: 0; width: min(520px, 94vw); background: var(--surface); color: var(--text); box-shadow: var(--shadow-strong); }
 .modal.wide { width: min(1100px, 96vw); }
 .modal::backdrop { background: rgb(23 22 21 / 50%); backdrop-filter: blur(3px); }
 .modal[open] { animation: pop .18s ease-out; }

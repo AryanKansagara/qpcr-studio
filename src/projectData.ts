@@ -26,7 +26,7 @@ export async function createBlankProject(name: string) {
   const d = getDefaults()
   const p: Project = {
     id: uuid(), name, createdAt: Date.now(), updatedAt: Date.now(), plates: [], settings: settingsFromDefaults(),
-    meta: { ...blankMeta(), instrument: d.instrument }, registry: { status: 'running', owner: d.owner, tags: '', started: new Date().toISOString().slice(0, 10) },
+    meta: { ...blankMeta(), instrument: d.instrument }, registry: { status: 'running', owner: d.owner, tags: '', started: new Date().toLocaleDateString('en-CA') },
     snapshots: [], imports: [],
   }
   return saveProject(p)

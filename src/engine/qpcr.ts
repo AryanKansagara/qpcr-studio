@@ -213,7 +213,7 @@ export function analyze(plates: Plate[], s: Settings): Analysis {
   // 6. Reference stability.
   const cands = s.candidates.filter(t => targetsAll.includes(t))
   const stability = cands.length >= 2 ? refStability(cands, samples, sampleGroup, L, (smp, t) => cqMap.get(`${smp}|${t}`) ?? null, control) : null
-  if (cands.length > 0 && cands.length < 3) warnings.push('geNorm pairwise variation and NormFinder need at least three candidate reference genes.')
+  if (cands.length === 2) warnings.push('geNorm pairwise variation and NormFinder need at least three candidate reference genes.')
 
   // 7. Normalisation and statistics.
   const refs = s.refs.filter(t => targetsAll.includes(t))
