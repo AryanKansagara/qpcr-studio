@@ -1,28 +1,33 @@
 import { CFX_CSV, GENERIC_CSV, LC480_TXT, QUANTSTUDIO_TXT, ROTORGENE_CSV } from './engine/fixtures.ts'
 import { Code, download, Link } from './ui.tsx'
 
-const REVIEWED = 'November 9, 2026'
+const REVIEWED = 'November 15, 2026'
 
 const INSTRUMENTS = [
   {
     id: 'cfx', name: 'Bio-Rad CFX Maestro (CFX96 / CFX384 / CFX Opus)', file: 'example_cfx_quantification_cq_results.csv', text: CFX_CSV,
     steps: ['Open the run (.pcrd) in CFX Maestro and check the baseline and threshold on the Quantification tab.', 'Set Content (Unkn, Std, NTC, NRT), sample names, targets and Biological Set Name in the Plate Setup if you have not already.', 'Choose Export > Export All Data Sheets > CSV (or right-click the Quantification Data table > Export to CSV).', 'Import the file ending in “Quantification Cq Results.csv”.'],
-    notes: 'Recognised columns: Well, Fluor, Target, Content, Sample, Biological Set Name, Cq, Starting Quantity (SQ). Cq “NaN” is read as no amplification. Content codes like “Unkn-01” and “Std-02” map to Sample and Standard. Melt peaks are in a separate “Melt Curve Peak Results” file; copy its Melt Temperature column into the Cq file (or a generic CSV) to run Tm checks.',
+    notes: 'Recognised columns: Well, Fluor, Target, Content, Sample, Biological Set Name, Cq, Starting Quantity (SQ). Cq “NaN” or “N/A” is read as no amplification. In a multiplex run exported without target names, the fluorophore (FAM, VIC) is used as the target so the assays stay separate. Content codes like “Unkn-01” and “Std-02” map to Sample and Standard. Melt peaks are in a separate “Melt Curve Peak Results” file; copy its Melt Temperature column into the Cq file (or a generic CSV) to run Tm checks.',
   },
   {
     id: 'qs', name: 'Thermo Fisher QuantStudio (Design & Analysis 2, QuantStudio Real-Time PCR Software)', file: 'example_quantstudio_results.txt', text: QUANTSTUDIO_TXT,
     steps: ['Analyse the run, then open Export (Actions > Export in Design & Analysis; File > Export in the older QuantStudio software).', 'Select the Results content. Choose .xlsx or .txt.', 'Import the file; for .xlsx the “Results” sheet is read.'],
-    notes: 'Header lines starting with “*” are read for the instrument type. The table under [Results] is parsed until the next [section]. Recognised columns: Well Position, Sample Name, Target Name, Task (UNKNOWN, STANDARD, NTC), CT or Cq, Quantity, Tm1. “Undetermined” is read as no amplification.',
+    notes: 'Header lines starting with “*” are read for the instrument type. The table under [Results] is parsed until the next [section]. Recognised columns: Well Position, Sample Name, Target Name, Task (UNKNOWN, STANDARD, NTC), CT or Cq, Quantity, Tm1. “Undetermined” is read as no amplification. Design & Analysis 2 sheets (columns Sample, Target, Cq) are read the same way; their Results sheet has no Quantity column, so standard quantities are taken from sample names such as “Std_5K” and shown for you to confirm. Quantities written with thousands separators (“10,000.000”) are read correctly. Wells with Omit = true start excluded. Genotyping exports are not supported.',
   },
   {
     id: 'lc', name: 'Roche LightCycler 480 (LightCycler 480 SW 1.5)', file: 'example_lc480_abs_quant.txt', text: LC480_TXT,
     steps: ['Run Abs Quant / 2nd Derivative Max (or Fit Points) analysis.', 'Right-click the results table and choose Export, saving as a text file.', 'One export covers one filter combination. Enter the target name in the import step, or assign targets in the plate map.'],
-    notes: 'Recognised columns: Pos, Name, Cp, Standard, Concentration, and Tm1 from a Tm Calling export. Wells with a value in Standard become standards. Names starting with NTC, H2O or water become NTCs.',
+    notes: 'Recognised columns: Pos, Name, Cp, Standard, Concentration, and Tm1 from a Tm Calling export. Wells with a value above 0 in Standard become standards. Wells with Include = False start excluded. The raw fluorescence export (SamplePos, Cycle#) is not a results table and is rejected with a note. Names starting with NTC, H2O or water become NTCs.',
   },
   {
     id: 'rg', name: 'Qiagen Rotor-Gene Q (Rotor-Gene Q Series Software)', file: 'example_rotorgene_quantitation.csv', text: ROTORGENE_CSV,
     steps: ['Open the Quantitation analysis for the channel (e.g. Cycling A.Green).', 'Export the quantitation results table to CSV or Excel from the report or export menu.', 'In the import, tick “Positions are numbered” and enter the target name.'],
     notes: 'Recognised columns: No., Name, Type (Unknown, Standard, NTC, Negative Control), Ct, Given Conc. Rotor positions are shown on a 96-well grid in reading order.',
+  },
+  {
+    id: 'rdml', name: 'RDML (any instrument that exports it: LightCycler 96, CFX, StepOne, Rotor-Gene, RDML-Tools)', file: '', text: '',
+    steps: ['Export the analysed run as RDML (.rdml) from the instrument software.', 'Drop the file in the import step. If it holds several runs, pick the run; import the others one at a time as further plates.'],
+    notes: 'RDML versions 1.0 to 1.4 are read. Used per reaction: well, sample (or its description when the id is a generated code), sample type (unkn, std, ntc, nrt, nac, pos), target, Cq, melting temperature and the sample quantity for standards. Reactions marked excluded start excluded. Cq values of -1 or NaN are read as no amplification. Amplification and melt curve points are ignored; a file with curves but no Cq values has to be analysed first.',
   },
   {
     id: 'generic', name: 'Generic CSV, TSV or XLSX (any instrument)', file: 'example_generic.csv', text: GENERIC_CSV,
@@ -37,16 +42,27 @@ export default function Docs() {
       <p className="eyebrow">Docs · reviewed {REVIEWED}</p>
       <h1>Getting your data out of the instrument</h1>
       <p className="muted">qPCR Studio reads the results table your instrument software already exports: one Cq per well. Files are parsed in your browser. Column layouts follow each vendor’s current user guide and public example exports; if your software version names a column differently, map it in the import step.</p>
-      <nav className="toc" aria-label="On this page">{INSTRUMENTS.map(i => <a key={i.id} href={`#${i.id}`}>{i.name.split(' (')[0]}</a>)}<a href="#calc">Calculations</a><a href="#stability">Reference stability</a><a href="#stats">Statistics</a><a href="#rules">QC rules</a><a href="#data">Your data</a></nav>
+      <nav className="toc" aria-label="On this page">{INSTRUMENTS.map(i => <a key={i.id} href={`#${i.id}`}>{i.name.split(' (')[0]}</a>)}<a href="#tested">Tested files</a><a href="#calc">Calculations</a><a href="#stability">Reference stability</a><a href="#stats">Statistics</a><a href="#rules">QC rules</a><a href="#data">Your data</a></nav>
       {INSTRUMENTS.map(i => (
         <article key={i.id} id={i.id} className="doc-block">
           <h2>{i.name}</h2>
           <ol>{i.steps.map(s => <li key={s}>{s}</li>)}</ol>
           <p className="small">{i.notes}</p>
-          <details className="more"><summary>Example layout (synthetic)</summary><Code code={i.text} label={i.file} /></details>
-          <button type="button" className="btn ghost sm" onClick={() => download(i.file, i.text, 'text/plain')}>Download example</button>
+          {i.text && <><details className="more"><summary>Example layout (synthetic)</summary><Code code={i.text} label={i.file} /></details>
+          <button type="button" className="btn ghost sm" onClick={() => download(i.file, i.text, 'text/plain')}>Download example</button></>}
         </article>
       ))}
+
+      <article id="tested" className="doc-block">
+        <h2>Files the importers were checked against</h2>
+        <p>On November 15, 2026 the importers were run against public example exports, and the cases they exposed are now in the test suite:</p>
+        <ul>
+          <li><b>QuantStudio text and spreadsheet exports, Design &amp; Analysis 2 workbooks, CFX Maestro CSV:</b> test data of the <a href="https://github.com/Benchling-Open-Source/allotropy" rel="noreferrer">Allotropy</a> project (MIT licence), including the QuantStudio 7 Flex standard-curve example run. The standard curve fitted here from that file gives slope −3.383, intercept 39.814, R² 0.997 and efficiency 97.50%, the values the instrument software wrote in the same export.</li>
+          <li><b>LightCycler 480 and CFX:</b> the sample files of the Bioconductor packages <a href="https://bioconductor.org/packages/HTqPCR/" rel="noreferrer">HTqPCR</a> and <a href="https://bioconductor.org/packages/ReadqPCR/" rel="noreferrer">ReadqPCR</a>.</li>
+          <li><b>RDML 1.0, 1.1 and 1.4:</b> files from the <a href="https://github.com/RDML-consortium/rdmlpython" rel="noreferrer">RDML consortium</a> and the R package <a href="https://github.com/kablag/RDML" rel="noreferrer">RDML</a> (Bio-Rad CFX96, LightCycler 96 and StepOne exports).</li>
+          <li><b>Rotor-Gene:</b> no public example of the quantitation report was found, so that layout follows the user guide only. If yours does not import, map the columns by hand in the import step.</li>
+        </ul>
+      </article>
 
       <article id="calc" className="doc-block">
         <h2>Calculations</h2>

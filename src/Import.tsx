@@ -72,6 +72,9 @@ export function ImportWizard({ open, onClose, p }: { open: boolean; onClose(): v
     setSrc({ name, rows }); setDet(d); setHeaderIndex(hi)
     setMapping(d?.mapping ?? guessMapping(rows[hi]?.cells ?? []))
     setDefaultTarget('')
+    // Instrument exports carry the run time in their header ("Experiment Run End Time = 2010-10-20 ...").
+    const stamp = rows.slice(0, 80).map(r => /run (end|start)[^=]*?(?:time)?\s*=?\s*(\d{4}-\d{2}-\d{2})/i.exec(r.cells.join(' '))?.[2]).find(Boolean)
+    setRunDate(stamp ?? new Date().toLocaleDateString('en-CA'))
     setNumbered(d?.numbered ?? false)
     setPlateName(name.replace(/\.(csv|txt|tsv|xlsx?|rdml?|xml)$/i, '').replace(/[_-]+/g, ' ').slice(0, 60) || `Plate ${p.plates.length + 1}`)
   }
@@ -145,7 +148,7 @@ export function ImportWizard({ open, onClose, p }: { open: boolean; onClose(): v
                 {runs.list.map((r, i) => <option key={i} value={i}>{r.name} ({r.rows.length - 2} reactions)</option>)}
               </select></label>}
               <label className="field"><span>Header line</span><select value={headerIndex} onChange={e => { const i = +e.target.value; setHeaderIndex(i); setMapping(guessMapping(src.rows[i].cells)) }}>
-                {src.rows.slice(0, 80).map((r, i) => r.cells.filter(Boolean).length > 1 && <option key={i} value={i}>Line {r.line}: {r.cells.filter(Boolean).slice(0, 4).join(', ').slice(0, 50)}</option>)}
+                {src.rows.map((r, i) => (i < 80 || i === headerIndex) && r.cells.filter(Boolean).length > 1 && <option key={i} value={i}>Line {r.line}: {r.cells.filter(Boolean).slice(0, 4).join(', ').slice(0, 50)}</option>)}
               </select></label>
               <label className="field"><span>Plate name</span><input value={plateName} onChange={e => setPlateName(e.target.value)} /></label>
               <label className="field"><span>Run date</span><input type="date" value={runDate} onChange={e => setRunDate(e.target.value)} /></label>
