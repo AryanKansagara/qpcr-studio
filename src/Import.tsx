@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { detect, FIELDS, FORMAT_LABEL, fromSheet, guessMapping, parseDelimited, parseRows, type Detected, type Field, type Mapping, type Row } from './engine/parse.ts'
+import { detect, FIELDS, FORMAT_LABEL, fromSheet, guessMapping, parseDelimited, parseRdml, parseRows, unsupportedReason, type Detected, type Field, type Mapping, type RdmlRun, type Row } from './engine/parse.ts'
 import { CFX_CSV, GENERIC_CSV, LC480_TXT, QUANTSTUDIO_TXT, ROTORGENE_CSV } from './engine/fixtures.ts'
 import type { Plate } from './engine/qpcr.ts'
 import { PlateMap } from './PlateMap.tsx'
@@ -16,15 +16,35 @@ const EXAMPLES: [string, string, string][] = [
   ['Generic CSV', 'example_generic.csv', GENERIC_CSV],
 ]
 
-export async function readFile(f: File): Promise<Row[]> {
+// Instrument software on Windows often writes UTF-16 text exports.
+const decode = (b: Uint8Array) => new TextDecoder(b[0] === 0xff && b[1] === 0xfe ? 'utf-16le' : b[0] === 0xfe && b[1] === 0xff ? 'utf-16be' : 'utf-8').decode(b)
+
+export async function readFile(f: File): Promise<Row[] | RdmlRun[]> {
+  const bytes = new Uint8Array(await f.arrayBuffer())
+  const zipped = bytes[0] === 0x50 && bytes[1] === 0x4b
+  if (/\.(rdml|rdm|xml)$/i.test(f.name)) {
+    let xml = ''
+    if (zipped) {
+      // An .rdml file is a zip holding one XML document.
+      const XLSX = await import('xlsx')
+      const entry = XLSX.CFB.read(bytes, { type: 'array' }).FileIndex.find((e: { name: string; content?: ArrayLike<number> }) => /\.xml$/i.test(e.name) && e.content?.length)
+      if (!entry) throw new Error('no XML document inside the RDML archive')
+      xml = decode(new Uint8Array(entry.content as ArrayLike<number>))
+    } else xml = decode(bytes)
+    const runs = parseRdml(xml)
+    if (!runs.length) throw new Error('no runs with reactions found in this RDML file')
+    if (!runs.some(r => r.rows.slice(2).some(x => x.cells[4]))) throw new Error('it holds amplification curves but no Cq values. Analyse the run in the instrument software or RDML-Tools (LinRegPCR) first, then export again')
+    return runs
+  }
   if (/\.xlsx?$/i.test(f.name)) {
     const XLSX = await import('xlsx')
-    const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' })
+    const wb = XLSX.read(bytes, { type: 'array' })
     const name = wb.SheetNames.find(n => /^results?$/i.test(n.trim())) ?? wb.SheetNames.find(n => /result/i.test(n)) ?? wb.SheetNames[0]
     return fromSheet(XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '', raw: false }) as unknown[][])
   }
-  return parseDelimited(await f.text())
+  return parseDelimited(decode(bytes))
 }
+const isRuns = (x: Row[] | RdmlRun[]): x is RdmlRun[] => x.length > 0 && 'rows' in x[0]
 
 export function ImportWizard({ open, onClose, p }: { open: boolean; onClose(): void; p: Project }) {
   const [src, setSrc] = useState<{ name: string; rows: Row[] } | null>(null)
@@ -39,24 +59,35 @@ export function ImportWizard({ open, onClose, p }: { open: boolean; onClose(): v
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [drag, setDrag] = useState(false)
+  const [runs, setRuns] = useState<{ file: string; list: RdmlRun[]; i: number } | null>(null)
 
-  const reset = () => { setSrc(null); setDet(null); setErr(null); setPaste('') }
+  const reset = () => { setSrc(null); setDet(null); setErr(null); setPaste(''); setRuns(null) }
   const load = (name: string, rows: Row[]) => {
     setErr(null)
     const d = detect(rows)
+    const why = d ? null : unsupportedReason(rows)
+    if (why) { setErr(why); return }
     if (!rows.some(r => r.cells.length > 1)) { setErr(`${name} has no tabular rows. Export the results table as CSV, TXT or XLSX (see the docs).`); return }
     const hi = d?.headerIndex ?? Math.max(0, rows.findIndex(r => r.cells.filter(Boolean).length > 2))
     setSrc({ name, rows }); setDet(d); setHeaderIndex(hi)
     setMapping(d?.mapping ?? guessMapping(rows[hi]?.cells ?? []))
     setDefaultTarget('')
     setNumbered(d?.numbered ?? false)
-    setPlateName(name.replace(/\.(csv|txt|tsv|xlsx?)$/i, '').replace(/[_-]+/g, ' ').slice(0, 60) || `Plate ${p.plates.length + 1}`)
+    setPlateName(name.replace(/\.(csv|txt|tsv|xlsx?|rdml?|xml)$/i, '').replace(/[_-]+/g, ' ').slice(0, 60) || `Plate ${p.plates.length + 1}`)
+  }
+  const loadRun = (file: string, list: RdmlRun[], i: number) => {
+    load(file, list[i].rows)
+    if (list.length > 1) setPlateName(list[i].name.slice(0, 60))
+    if (list[i].runDate) setRunDate(list[i].runDate)
   }
   const onFile = async (f: File | undefined) => {
     if (!f) return
     if (f.size > 25_000_000) { setErr('That file is over 25 MB. Export only the results table (not amplification or raw data).'); return }
     setBusy(true)
-    try { load(f.name, await readFile(f)) } catch (e) { setErr(`Could not read ${f.name}: ${e instanceof Error ? e.message : String(e)}`) } finally { setBusy(false) }
+    try {
+      const got = await readFile(f)
+      if (isRuns(got)) { setRuns({ file: f.name, list: got, i: 0 }); loadRun(f.name, got, 0) } else { setRuns(null); load(f.name, got) }
+    } catch (e) { setErr(`Could not read ${f.name}: ${e instanceof Error ? e.message : String(e)}`) } finally { setBusy(false) }
   }
 
   const header = src?.rows[headerIndex]?.cells ?? []
@@ -70,7 +101,9 @@ export function ImportWizard({ open, onClose, p }: { open: boolean; onClose(): v
     if (!parsed || !preview || !parsed.wells.length) return
     const plate: Plate = { ...preview, id: uuid(), name: plateName.trim() || `Plate ${p.plates.length + 1}`, runDate, fileName: src!.name }
     const plates = [...p.plates, plate]
-    const settings = autoConfigure(plates, p.settings)
+    let settings = autoConfigure(plates, p.settings)
+    // Wells omitted in the instrument software start excluded; they can be put back in QC.
+    if (parsed.omitted.length) settings = { ...settings, excluded: { ...settings.excluded, ...Object.fromEntries(parsed.omitted.map(w => [`${plate.id}|${w}`, true])) } }
     const next: Project = {
       ...p, plates, settings,
       meta: { ...p.meta, instrument: p.meta.instrument || det?.instrument || '' },
@@ -87,9 +120,9 @@ export function ImportWizard({ open, onClose, p }: { open: boolean; onClose(): v
       {!src ? (
         <div className="stack">
           <div className={`drop${drag ? ' over' : ''}`} onDragOver={e => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)} onDrop={e => { e.preventDefault(); setDrag(false); void onFile(e.dataTransfer.files[0]) }}>
-            <p><b>Drop a CSV, TXT or XLSX export here</b></p>
-            <label className="btn primary">Choose file<input type="file" className="sr-only" accept=".csv,.txt,.tsv,.xls,.xlsx" onChange={e => void onFile(e.target.files?.[0])} /></label>
-            <p className="muted small">CFX Maestro “Quantification Cq Results”, QuantStudio / Design & Analysis “Results”, LightCycler 480 text export, Rotor-Gene quantitation report, or any table with well and Cq columns. <Link href="/docs">Export steps</Link></p>
+            <p><b>Drop a CSV, TXT, XLSX or RDML export here</b></p>
+            <label className="btn primary">Choose file<input type="file" className="sr-only" accept=".csv,.txt,.tsv,.xls,.xlsx,.rdml,.rdm,.xml" onChange={e => void onFile(e.target.files?.[0])} /></label>
+            <p className="muted small">CFX Maestro “Quantification Cq Results”, QuantStudio / Design & Analysis “Results”, LightCycler 480 text export, Rotor-Gene quantitation report, RDML from any instrument, or any table with well and Cq columns. <Link href="/docs">Export steps</Link></p>
             {busy && <p role="status"><span className="spinner" /> Reading</p>}
           </div>
           <details className="more">
@@ -108,6 +141,9 @@ export function ImportWizard({ open, onClose, p }: { open: boolean; onClose(): v
           <div className="stack">
             <div className={`banner ${det ? 'ok' : 'warn'}`}>{det ? <>Detected <b>{FORMAT_LABEL[det.format]}</b>, header on line {src.rows[headerIndex].line}.</> : 'Format not recognised. Pick the header line and map the columns.'}</div>
             <div className="row gap wrap">
+              {runs && runs.list.length > 1 && <label className="field"><span>Run in this file ({runs.list.length})</span><select value={runs.i} onChange={e => { const i = +e.target.value; setRuns({ ...runs, i }); loadRun(runs.file, runs.list, i) }}>
+                {runs.list.map((r, i) => <option key={i} value={i}>{r.name} ({r.rows.length - 2} reactions)</option>)}
+              </select></label>}
               <label className="field"><span>Header line</span><select value={headerIndex} onChange={e => { const i = +e.target.value; setHeaderIndex(i); setMapping(guessMapping(src.rows[i].cells)) }}>
                 {src.rows.slice(0, 80).map((r, i) => r.cells.filter(Boolean).length > 1 && <option key={i} value={i}>Line {r.line}: {r.cells.filter(Boolean).slice(0, 4).join(', ').slice(0, 50)}</option>)}
               </select></label>

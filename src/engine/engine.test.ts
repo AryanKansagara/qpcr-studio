@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { anova, grubbs, mannWhitney, qdunnett, qtukey, tQuantile, welch } from './stats.ts'
 import { analyze, defaultSettings, guessGroup, methodsText, miqe, blankMeta, standardCurve, wellName, type Plate, type Settings, type Well } from './qpcr.ts'
-import { detect, parseDelimited, parseLayout, parseRows } from './parse.ts'
+import { detect, fromSheet, parseDelimited, parseLayout, parseRdml, parseRows, unsupportedReason } from './parse.ts'
+import { CFX_REAL_DUPLEX, DA2_RESULTS_SHEET, LC480_REAL_LAYOUT, QS_REAL_STANDARD_CURVE, RDML_PLATE, RDML_V10 } from './realFixtures.ts'
 import { CFX_CSV, GENERIC_CSV, LC480_TXT, QUANTSTUDIO_TXT, ROTORGENE_CSV } from './fixtures.ts'
 import { SAMPLES } from './sample.ts'
 
@@ -331,7 +332,8 @@ test('validation reports line numbers for bad wells, bad Cq and duplicates', () 
   assert.equal(at(3)[0].level, 'error')
   assert.match(at(4)[0].msg, /not a number/)
   assert.match(at(5)[0].msg, /Duplicate A1.*line 2/)
-  assert.equal(at(6).length, 2)
+  assert.equal(at(6).length, 1)
+  assert.ok(r.issues.some(i => /No sample name for 1 well \(A3\)/.test(i.msg)))
   assert.equal(r.wells.length, 2); assert.equal(r.skipped, 3)
 })
 
@@ -353,4 +355,109 @@ test('group names are guessed from replicate suffixes', () => {
   assert.equal(guessGroup('Vehicle_rep3'), 'Vehicle')
   assert.equal(guessGroup('KO 1'), 'KO')
   assert.equal(guessGroup('WT'), 'WT')
+})
+
+// ---------- Real export layouts ----------
+
+const importText = (txt: string) => { const rows = parseDelimited(txt); const d = detect(rows)!; return { d, r: parseRows(rows, d.headerIndex, d.mapping, { numbered: d.numbered }) } }
+
+test('real QuantStudio export: Results is found after Sample Setup and thousands separators are read', () => {
+  const { d, r } = importText(QS_REAL_STANDARD_CURVE)
+  assert.equal(d.format, 'quantstudio'); assert.equal(d.instrument, 'Thermo QuantStudio 7 Flex System')
+  assert.equal(r.issues.filter(i => i.level === 'error').length, 0)
+  const std = r.wells.filter(w => w.role === 'standard')
+  assert.equal(std.length, 20)
+  assert.deepEqual([...new Set(std.map(w => w.quantity))].sort((a, b) => a! - b!), [1250, 2500, 5000, 10000, 20000])
+  // The software's interpolated quantity of an unknown is not kept as an input.
+  assert.ok(r.wells.filter(w => w.role === 'unknown').every(w => w.quantity === null))
+  assert.equal(r.wells.filter(w => w.role === 'ntc' && w.cq === null).length, 4)
+})
+
+test('real QuantStudio standard curve reproduces the slope, intercept, R2 and efficiency the instrument reported', () => {
+  const { r } = importText(QS_REAL_STANDARD_CURVE)
+  const plate: Plate = { id: 'p', name: 'p', format: 96, instrument: '', wells: r.wells }
+  const c = analyze([plate], defaultSettings()).curves.find(x => x.target === 'RNase P')!
+  // Columns Slope, Y-Intercept, R(superscript 2) and Efficiency of the export: -3.383, 39.814, 0.997, 97.505.
+  near(c.slope, -3.383, 0.001); near(c.intercept, 39.814, 0.001); near(c.r2!, 0.997, 0.001); near(c.efficiency! * 100, 97.505, 0.01)
+})
+
+test('real CFX duplex run without target names: the fluorophore separates the two assays', () => {
+  const { d, r } = importText(CFX_REAL_DUPLEX)
+  assert.equal(d.format, 'cfx')
+  assert.equal(r.wells.length, 8); assert.equal(r.skipped, 0)
+  assert.deepEqual([...new Set(r.wells.map(w => w.target))], ['FAM', 'VIC'])
+  assert.equal(r.issues.length, 1); assert.match(r.issues[0].msg, /fluorophore \(FAM, VIC\)/)
+  assert.equal(r.wells[0].group, 'PBS Baseline'); near(r.wells[0].cq!, 21.1877528266099, 1e-12)
+})
+
+test('real LightCycler layout: Standard = 0 is not a standard, Include = False starts excluded', () => {
+  const { d, r } = importText(LC480_REAL_LAYOUT)
+  assert.equal(d.format, 'lc480'); assert.equal(d.defaultTarget, 'SYBR Green (483-533)')
+  assert.deepEqual(r.wells.map(w => w.role), ['unknown', 'unknown', 'unknown', 'standard', 'standard', 'standard', 'standard'])
+  assert.equal(r.wells[0].quantity, null); assert.equal(r.wells[3].quantity, 1e6); assert.equal(r.wells[3].well, 'F9')
+  assert.deepEqual(r.omitted, ['A3'])
+})
+
+test('Design & Analysis sheet: Sample/Target/Cq headers, footer rows, unused wells and Omit', () => {
+  const rows = fromSheet(DA2_RESULTS_SHEET)
+  const d = detect(rows)!
+  assert.equal(d.format, 'quantstudio'); assert.equal(d.instrument, 'Thermo QuantStudio 1 System')
+  const r = parseRows(rows, d.headerIndex, d.mapping)
+  assert.equal(r.issues.filter(i => i.level === 'error').length, 0)
+  assert.equal(r.wells.length, 8)
+  assert.ok(r.issues.some(i => /1 well with no sample name and no Cq was treated as empty/.test(i.msg)))
+  assert.deepEqual(r.omitted, ['A2'])
+  assert.equal(r.wells.find(w => w.well === 'B1')!.role, 'ntc')
+})
+
+test('standard quantities are read from names like Std_5K, but a plain numbering is not a dilution series', () => {
+  const rows = fromSheet(DA2_RESULTS_SHEET)
+  const d = detect(rows)!
+  const std = parseRows(rows, d.headerIndex, d.mapping).wells.filter(w => w.role === 'standard')
+  assert.deepEqual(std.map(w => w.quantity), [1250, 2500, 5000, 10000, 20000])
+  const r = importText('well,sample,target,cq,role\nA1,Std 1,G,20,Std\nA2,Std 2,G,23,Std\nA3,Std 3,G,26,Std\nA4,Std 4,G,29,Std\n').r
+  assert.ok(r.wells.every(w => w.quantity === null))
+  assert.ok(r.issues.some(i => /No quantity for 4 wells/.test(i.msg)))
+})
+
+test('a decimal comma file is not mistaken for thousands separators', () => {
+  const r = importText('Well;Sample;Target;Cq;Quantity;Task\nA1;S1;G;"18,123";;UNKNOWN\nA2;Std;G;"21,5";"1000,5";STANDARD\n').r
+  assert.equal(r.wells[0].cq, 18.123); assert.equal(r.wells[1].quantity, 1000.5)
+})
+
+test('Cq sentinels outside 0 to 50 are read as no amplification', () => {
+  const r = importText('well,sample,target,cq\nA1,S1,G,100\nA2,S1,G,0\nA3,S1,G,24.5\n').r
+  assert.deepEqual(r.wells.map(w => w.cq), [null, null, 24.5])
+  assert.equal(r.issues.filter(i => /read as no amplification/.test(i.msg)).length, 2)
+})
+
+test('RDML 1.1 plate: wells from reaction numbers, names from descriptions, runs, exclusions', () => {
+  const runs = parseRdml(RDML_PLATE)
+  assert.deepEqual(runs.map(x => x.name), ['Plate 1', 'Plate 2'])
+  assert.equal(runs[0].runDate, '2014-08-19')
+  const d = detect(runs[0].rows)!
+  assert.equal(d.format, 'rdml'); assert.equal(d.instrument, 'Roche Diagnostics')
+  const r = parseRows(runs[0].rows, d.headerIndex, d.mapping)
+  assert.deepEqual(r.wells.map(w => [w.well, w.sample, w.target, w.role, w.cq, w.quantity]), [
+    ['A1', 'Liver & kidney 1', 'FAM', 'unknown', 24.09, null],
+    ['A1', 'Liver & kidney 1', 'bACT', 'unknown', 18.5, null],
+    ['B2', 'Sample 39', 'bACT', 'standard', 21.75, 1000],
+    ['H12', 'H2O', 'bACT', 'ntc', null, null],
+  ])
+  assert.deepEqual(r.omitted, ['A1'])
+  const r2 = parseRows(runs[1].rows, 1, detect(runs[1].rows)!.mapping)
+  assert.deepEqual(r2.wells.map(w => [w.well, w.cq, w.tm]), [['C1', null, null], ['C2', 19.02, 84.5]])
+})
+
+test('RDML 1.0: well names as reaction ids and sample quantities', () => {
+  const [run] = parseRdml(RDML_V10)
+  assert.equal(run.name, 'Standard Curve Example / Run001')
+  const r = parseRows(run.rows, 1, detect(run.rows)!.mapping)
+  assert.deepEqual(r.wells.map(w => [w.well, w.role, w.cq, w.quantity]), [['A1', 'ntc', 40, null], ['B7', 'standard', 26.31, 10000]])
+})
+
+test('exports that are not a Cq table get a specific explanation', () => {
+  assert.match(unsupportedReason(parseDelimited('Well\tWell Position\tOmit\tSample Name\tSNP Assay Name\tTask\tAllele1 Ct\tAllele2 Ct\n1\tA1\tfalse\tNTC\tCYP19_2\tNTC\tUndetermined\tUndetermined\n'))!, /genotyping/)
+  assert.match(unsupportedReason(parseDelimited('SamplePos\tSampleName\tProg#\tSeg#\tCycle#\tTime\tTemp\t465-510\nA1\tSample_1\t2\t3\t1\t691600\t71.79\t15.58\n'))!, /raw fluorescence/)
+  assert.equal(unsupportedReason(parseDelimited(GENERIC_CSV)), null)
 })

@@ -1,12 +1,13 @@
 // Instrument export parsing: delimiter sniffing, format detection, column mapping and line-numbered validation.
 import { formatFor, normWell, parseWell, wellFromIndex, type Role, type Well } from './qpcr.ts'
 
-export type FormatId = 'cfx' | 'quantstudio' | 'lc480' | 'rotorgene' | 'generic'
+export type FormatId = 'cfx' | 'quantstudio' | 'lc480' | 'rotorgene' | 'rdml' | 'generic'
 export const FORMAT_LABEL: Record<FormatId, string> = {
   cfx: 'Bio-Rad CFX Maestro · Quantification Cq Results',
   quantstudio: 'Thermo QuantStudio / Design & Analysis · Results',
   lc480: 'Roche LightCycler 480 · text export',
   rotorgene: 'Qiagen Rotor-Gene · quantitation report',
+  rdml: 'RDML (Real-time PCR Data Markup Language)',
   generic: 'Generic table',
 }
 
@@ -67,9 +68,12 @@ const SYN: Record<Field, RegExp> = {
   group: /^(biological (set|group)( name)?|group|condition|treatment)$/i,
 }
 
+// Some QuantStudio versions write Ct with a Cyrillic "т".
+const cleanHeader = (h: string) => h.replace(/т/g, 't').replace(/\s+/g, ' ').trim()
+
 export function guessMapping(header: string[]): Mapping {
   const m: Mapping = {}
-  const clean = header.map(h => h.replace(/\s+/g, ' ').trim())
+  const clean = header.map(cleanHeader)
   for (const f of Object.keys(SYN) as Field[]) {
     const i = clean.findIndex((h, idx) => SYN[f].test(h) && !Object.values(m).includes(idx))
     if (i >= 0) m[f] = i
@@ -87,13 +91,16 @@ export interface Detected { format: FormatId; headerIndex: number; header: strin
 
 export function detect(rows: Row[]): Detected | null {
   const meta = rows.slice(0, 80).map(r => r.cells.join(' '))
-  const find = (pred: (h: string[]) => boolean) => rows.findIndex(r => r.cells.length > 2 && pred(r.cells.map(c => c.toLowerCase())))
-  const instrMatch = meta.map(l => /^\*?\s*instrument type\s*=\s*(.+)$/i.exec(l)).find(Boolean)
+  const find = (pred: (h: string[]) => boolean) => rows.findIndex(r => r.cells.length > 2 && pred(r.cells.map(c => cleanHeader(c).toLowerCase())))
+  // "* Instrument Type = QuantStudio 5 System" in text exports, a "Instrument Type | QuantStudio 1 System" row in spreadsheets.
+  const instrMatch = meta.map(l => /^\*?\s*instrument type\s*=?\s*(.+)$/i.exec(l.trim())).find(Boolean)
+
+  if (rows[0]?.cells[0] === RDML_MARK) return mk('rdml', 1, rows[0].cells[1] ?? '', '', false)
 
   let i = find(h => h.includes('well') && h.includes('fluor') && h.includes('content') && (h.includes('cq') || h.includes('melt temperature')))
   if (i >= 0) return mk('cfx', i, 'Bio-Rad CFX', '', false)
-  i = find(h => h.includes('well position') && (h.includes('ct') || h.includes('cq') || h.includes('crt')) && (h.includes('target name') || h.includes('detector name')))
-  if (i >= 0) return mk('quantstudio', i, instrMatch ? `Thermo ${instrMatch[1].trim()}` : 'Thermo QuantStudio', '', false)
+  i = find(h => h.includes('well position') && (h.includes('ct') || h.includes('cq') || h.includes('crt')) && (h.includes('target name') || h.includes('detector name') || h.includes('target')))
+  if (i >= 0) return mk('quantstudio', i, instrMatch ? `Thermo ${instrMatch[1].replace(/\(TM\)|™|®/gi, '').replace(/\s+/g, ' ').trim()}` : 'Thermo QuantStudio', '', false)
   i = find(h => h.includes('pos') && h.includes('name') && (h.includes('cp') || h.includes('tm1')) && (h.includes('include') || h.includes('color')))
   if (i >= 0) {
     const filt = meta.map(l => /selected filter:\s*([^\t]+?)(\s{2,}|\t|$)/i.exec(l)).find(Boolean)
@@ -114,6 +121,15 @@ export function detect(rows: Row[]): Detected | null {
   }
 }
 
+/** For files that are a real instrument export but not a per-well Cq table: says what to export instead. */
+export function unsupportedReason(rows: Row[]): string | null {
+  const heads = rows.slice(0, 1200).filter(r => r.cells.length > 2).map(r => r.cells.map(c => c.toLowerCase()))
+  if (heads.some(h => h.includes('allele1 ct') || h.includes('snp assay name'))) return 'This is a QuantStudio genotyping export (two alleles per well). qPCR Studio analyses gene-expression runs: export the Results of a Standard Curve or Comparative Ct experiment.'
+  if (heads.some(h => h.includes('samplepos') && h.includes('cycle#'))) return 'This is a LightCycler raw fluorescence export, not a results table. In the LightCycler software run Abs Quant / 2nd Derivative Max, then right-click the results table and export it.'
+  if (heads.some(h => h.includes('cycle') && (h.includes('rn') || h.includes('delta rn'))) && !heads.some(h => h.includes('well position') && (h.includes('ct') || h.includes('cq')))) return 'This file holds amplification curves only. Export the Results table (one Cq per well) instead.'
+  return null
+}
+
 const UNDET = /^(undetermined|nan|n\/a|na|no ct|no cq|-|—|)$/i
 
 export function parseRole(raw: string, sample: string): Role {
@@ -131,7 +147,7 @@ export function parseRole(raw: string, sample: string): Role {
 }
 
 export interface ParseOptions { defaultTarget?: string; numbered?: boolean }
-export interface ParseResult { wells: Well[]; issues: Issue[]; format: 96 | 384; skipped: number }
+export interface ParseResult { wells: Well[]; issues: Issue[]; format: 96 | 384; skipped: number; /** Wells the instrument software had omitted (QuantStudio Omit, LightCycler Include). */ omitted: string[] }
 
 export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: ParseOptions = {}): ParseResult {
   const issues: Issue[] = []
@@ -139,14 +155,32 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
   const seen = new Map<string, number>()
   let skipped = 0
   const get = (r: Row, f: Field) => (m[f] === undefined ? '' : r.cells[m[f]!] ?? '')
-  const num = (s: string) => { const v = Number(s.replace(',', '.')); return s.trim() !== '' && isFinite(v) ? v : NaN }
   const body = rows.slice(headerIndex + 1)
-  const end = body.findIndex(r => !r.cells.length || /^\[.*\]$/.test(r.cells[0] ?? ''))
+  const blank = (r: Row) => r.cells.every(c => !c)
+  // The table ends at the next [section], or at a blank row followed by a footer (key/value lines) or nothing.
+  const end = body.findIndex((r, i) => {
+    if (/^\[.*\]$/.test(r.cells[0] ?? '')) return true
+    if (!blank(r)) return false
+    const next = body.slice(i + 1).find(x => !blank(x))
+    return !next || next.cells.filter(Boolean).length < 3 || /^\[.*\]$/.test(next.cells[0] ?? '')
+  })
   const data = end >= 0 ? body.slice(0, end) : body
+  // "5,720.562" and "100,000,000.000" use the comma for thousands (QuantStudio); "18,25" uses it as the decimal mark.
+  const numCols = (['cq', 'quantity', 'tm'] as Field[]).filter(f => m[f] !== undefined)
+  const thousands = data.some(r => numCols.some(f => /\d,\d{3}(\.|,\d{3})/.test(get(r, f))))
+  const num = (s: string) => { const t = s.trim(); const v = Number(thousands ? t.replace(/,/g, '') : t.replace(',', '.')); return t !== '' && isFinite(v) ? v : NaN }
+  const header = (rows[headerIndex]?.cells ?? []).map(h => cleanHeader(h).toLowerCase())
+  const dyeCol = header.findIndex(h => /^(fluor|reporter|dye)$/.test(h))
+  const omitCol = header.indexOf('omit'), includeCol = header.indexOf('include')
+  const omitted: string[] = []
+  let emptyWells = 0, dyeAsTarget = false
+  const fromName: Well[] = []
+  const noTarget: string[] = [], noSample: string[] = [], stdNoQty: string[] = []
+  const list = (w: string[]) => `${w.length} well${w.length > 1 ? 's' : ''} (${w.slice(0, 6).join(', ')}${w.length > 6 ? ', ...' : ''})`
   const idxMax = Math.max(0, ...data.map(r => num(get(r, 'well'))).filter(isFinite))
   const numberedFormat = idxMax > 96 ? 384 : 96
   for (const r of data) {
-    if (r.cells.every(c => !c)) continue
+    if (blank(r)) continue
     const rawWell = get(r, 'well')
     let well = ''
     if (parseWell(rawWell)) well = normWell(rawWell)
@@ -158,29 +192,115 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
       const v = num(rawCq)
       if (isNaN(v)) { issues.push({ line: r.line, level: 'error', msg: `Cq "${rawCq}" in ${well} is not a number. Row skipped.` }); skipped++; continue }
       cq = v
-      if (v <= 0 || v > 50) issues.push({ line: r.line, level: 'warn', msg: `Cq ${v} in ${well} is outside 0 to 50.` })
+      // Sentinels such as 0, -1 or 100 are how some software writes "no amplification".
+      if (v <= 0 || v > 50) { cq = null; issues.push({ line: r.line, level: 'warn', msg: `Cq ${v} in ${well} is outside 0 to 50; read as no amplification.` }) }
       else if (v > 40) issues.push({ line: r.line, level: 'warn', msg: `Cq ${v} in ${well} is above 40: at or past the reliable detection limit.` })
     }
     const sample = get(r, 'sample')
-    const target = get(r, 'target') || opts.defaultTarget || ''
     const role = m.role !== undefined ? parseRole(get(r, 'role'), sample) : parseRole('', sample)
+    // Unused wells that the software still lists (no sample, nothing amplified) are not part of the experiment.
+    if (role === 'unknown' && !sample && cq === null) { emptyWells++; continue }
+    let target = get(r, 'target') || opts.defaultTarget || ''
+    // Multiplex runs exported without target names: the fluorophore tells the assays apart.
+    if (!target && dyeCol >= 0 && r.cells[dyeCol]) { target = r.cells[dyeCol]; dyeAsTarget = true }
     const qRaw = get(r, 'quantity'), tmRaw = get(r, 'tm')
-    const quantity = qRaw && isFinite(num(qRaw)) ? num(qRaw) : null
+    let quantity = qRaw && isFinite(num(qRaw)) ? num(qRaw) : null
     const tm = tmRaw && isFinite(num(tmRaw)) ? num(tmRaw) : null
     // Without a role column, a known quantity marks a standard (LightCycler "Standard" column, generic dilution column).
-    const finalRole: Role = m.role === undefined && quantity !== null && role === 'unknown' ? 'standard' : role
-    if (!target) issues.push({ line: r.line, level: 'warn', msg: `No target for ${well}. Assign it in the plate map.` })
-    if (finalRole === 'unknown' && !sample) issues.push({ line: r.line, level: 'warn', msg: `No sample name for ${well}. Assign it in the plate map.` })
-    if (finalRole === 'standard' && !(quantity! > 0)) issues.push({ line: r.line, level: 'warn', msg: `Standard ${well} has no quantity, so it cannot be used in a standard curve.` })
+    // LightCycler writes 0 there for every non-standard well.
+    const finalRole: Role = m.role === undefined && quantity !== null && quantity > 0 && role === 'unknown' ? 'standard' : role
+    // Design & Analysis keeps standard quantities out of the Results sheet; standards are usually named after them.
+    let named = false
+    if (finalRole === 'standard' && !(quantity! > 0) && m.quantity === undefined) {
+      const q = /(\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s*([km])?\)?\s*$/i.exec(sample)
+      const v = q ? Number(q[1]) * (!q[2] ? 1 : q[2].toLowerCase() === 'k' ? 1e3 : 1e6) : 0
+      if (v > 0) { quantity = v; named = true }
+    }
+    // The quantity column of other wells is the software's own interpolation, not an input.
+    if (finalRole !== 'standard') quantity = null
+    if ((omitCol >= 0 && /^true$/i.test(r.cells[omitCol] ?? '')) || (includeCol >= 0 && /^false$/i.test(r.cells[includeCol] ?? ''))) omitted.push(well)
+    if (!target) noTarget.push(well)
+    if (finalRole === 'unknown' && !sample) noSample.push(well)
+    if (finalRole === 'standard' && !(quantity! > 0) && !named) stdNoQty.push(well)
     if (tmRaw && tm === null) issues.push({ line: r.line, level: 'warn', msg: `Tm "${tmRaw}" in ${well} is not a number; ignored.` })
     const key = `${well}|${target}`
     if (seen.has(key)) { issues.push({ line: r.line, level: 'warn', msg: `Duplicate ${well}${target ? ` / ${target}` : ''} (first seen on line ${seen.get(key)}). Kept the first.` }); skipped++; continue }
     seen.set(key, r.line)
     const group = get(r, 'group')
     wells.push({ well, sample, target, role: finalRole, cq, tm, quantity, ...(group ? { group } : {}) })
+    if (named) fromName.push(wells[wells.length - 1])
   }
-  if (!wells.length) issues.push({ line: rows[headerIndex]?.line ?? 1, level: 'error', msg: 'No data rows found under the header.' })
-  return { wells, issues, format: formatFor(wells.map(w => w.well)), skipped }
+  const at = rows[headerIndex]?.line ?? 1
+  if (emptyWells) issues.push({ line: at, level: 'warn', msg: `${emptyWells} well${emptyWells > 1 ? 's' : ''} with no sample name and no Cq ${emptyWells > 1 ? 'were' : 'was'} treated as empty and left out.` })
+  if (dyeAsTarget) issues.push({ line: at, level: 'warn', msg: `No target names in the file, so the fluorophore (${[...new Set(wells.map(w => w.target))].slice(0, 4).join(', ')}) is used as the target. Rename targets in the plate map.` })
+  if (fromName.length) {
+    // "Std_1250, Std_2500, ..." is a dilution series; "Std 1, Std 2, Std 3" is only a numbering.
+    const qs = [...new Set(fromName.map(w => w.quantity!))].sort((a, b) => a - b)
+    const numbering = qs.every((q, i) => Number.isInteger(q) && (i === 0 || q - qs[i - 1] === 1))
+    if (qs.length >= 3 && !numbering && qs[qs.length - 1] / qs[0] >= 8) issues.push({ line: at, level: 'warn', msg: `No quantity column: ${fromName.length} standard quantities were read from the sample names (${qs.slice(0, 4).join(', ')}${qs.length > 4 ? ', ...' : ''}). Check them in the plate map.` })
+    else for (const w of fromName) { w.quantity = null; stdNoQty.push(w.well) }
+  }
+  if (noTarget.length) issues.push({ line: at, level: 'warn', msg: `No target for ${list(noTarget)}. Assign it in the plate map.` })
+  if (noSample.length) issues.push({ line: at, level: 'warn', msg: `No sample name for ${list(noSample)}. Assign it in the plate map.` })
+  if (stdNoQty.length) issues.push({ line: at, level: 'warn', msg: `No quantity for ${list(stdNoQty)} marked as standards, so they cannot be used in a standard curve. Enter quantities in the plate map.` })
+  if (omitted.length) issues.push({ line: at, level: 'warn', msg: `${omitted.length} well${omitted.length > 1 ? 's were' : ' was'} omitted in the instrument software (${omitted.slice(0, 6).join(', ')}${omitted.length > 6 ? ', ...' : ''}) and will start excluded.` })
+  if (!wells.length) issues.push({ line: at, level: 'error', msg: 'No data rows found under the header.' })
+  return { wells, issues, format: formatFor(wells.map(w => w.well)), skipped, omitted }
+}
+
+// ---------- RDML ----------
+
+const RDML_MARK = 'RDML'
+const unxml = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+const GUID = /@?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export interface RdmlRun { name: string; runDate: string; rows: Row[] }
+
+/**
+ * Reads the Cq table of every run in an RDML document (versions 1.0 to 1.4) as rows the importer understands.
+ * Only per-reaction results are read; amplification and melt curve points are ignored.
+ */
+export function parseRdml(xml: string): RdmlRun[] {
+  const tag = (s: string, t: string) => { const m = new RegExp(`<${t}(?:\\s[^>]*)?>([\\s\\S]*?)</${t}>`).exec(s); return m ? unxml(m[1].trim()) : '' }
+  const blocks = (s: string, t: string) => [...s.matchAll(new RegExp(`<${t}\\s+id="([^"]*)"\\s*>([\\s\\S]*?)</${t}>`, 'g'))].map(m => ({ id: unxml(m[1]), body: m[2] }))
+  // Curve points are most of the file; drop them before matching.
+  const doc = xml.replace(/<(adp|mdp)>[\s\S]*?<\/\1>/g, '')
+  const head = doc.slice(0, doc.search(/<experiment[\s>]/) >>> 0)
+  const samples = new Map(blocks(head, 'sample').map(b => {
+    const desc = tag(b.body, 'description')
+    const q = /<quantity>\s*<value>([^<]*)<\/value>/.exec(b.body)
+    // LightCycler 96 uses GUIDs as ids and keeps the visible name in the description.
+    return [b.id, { name: GUID.test(b.id) ? desc : b.id, type: tag(b.body, 'type'), quantity: q ? q[1].trim() : '' }] as const
+  }))
+  const publisher = tag(tag(head, 'id'), 'publisher')
+  const version = /<rdml[^>]*\sversion="([^"]*)"/.exec(xml)?.[1] ?? ''
+  const runs: RdmlRun[] = []
+  for (const exp of blocks(doc, 'experiment')) for (const run of blocks(exp.body, 'run')) {
+    const cols = Number(tag(tag(run.body, 'pcrFormat'), 'columns')) || 12
+    const rowsN = Number(tag(tag(run.body, 'pcrFormat'), 'rows')) || 8
+    const out: Row[] = [
+      { line: 1, cells: [RDML_MARK, publisher, version] },
+      { line: 2, cells: ['Well', 'Sample', 'Target', 'Role', 'Cq', 'Tm', 'Quantity', 'Omit'] },
+    ]
+    for (const react of blocks(run.body, 'react')) {
+      const idx = Number(react.id)
+      // Ids are reading-order numbers in 1.1+, well names in some 1.0 files; rotors (one row) stay numbered.
+      const well = Number.isInteger(idx) && idx > 0 && rowsN > 1 && rowsN <= 16 && cols <= 24 ? String.fromCharCode(65 + Math.floor((idx - 1) / cols)) + (((idx - 1) % cols) + 1) : react.id
+      const sid = unxml(/<sample\s+id="([^"]*)"/.exec(react.body)?.[1] ?? '')
+      const smp = samples.get(sid) ?? { name: sid, type: '', quantity: '' }
+      for (const d of react.body.match(/<data>[\s\S]*?<\/data>/g) ?? []) {
+        const tar = unxml(/<tar\s+id="([^"]*)"/.exec(d)?.[1] ?? '').replace(GUID, '')
+        const cqRaw = tag(d, 'cq')
+        // RDML tools write -1 (and some instruments NaN) when nothing amplified.
+        const cq = cqRaw === '' || !(Number(cqRaw) > 0) ? '' : cqRaw
+        const excl = /<excl>\s*\S/.test(d)
+        const role = smp.type === 'opt' || smp.type === 'ntp' ? 'ntc' : smp.type
+        out.push({ line: out.length + 1, cells: [well, smp.name, tar, role, cq, tag(d, 'meltTemp'), smp.quantity, excl ? 'true' : ''] })
+      }
+    }
+    if (out.length > 2) runs.push({ name: exp.id === run.id || GUID.test(exp.id) ? run.id : `${exp.id} / ${run.id}`, runDate: tag(run.body, 'runDate').slice(0, 10), rows: out })
+  }
+  return runs
 }
 
 /**
