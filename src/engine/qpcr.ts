@@ -150,6 +150,8 @@ export interface Analysis {
   efficiencies: Record<string, Eff>
   melt: MeltFlag[]
   stability: Stability | null
+  /** Why candidates that were marked could not be ranked. */
+  stabilityNote?: string
   targets: TargetResult[]
   groups: string[]
   control: string
@@ -247,7 +249,11 @@ export function analyze(plates: Plate[], s: Settings): Analysis {
 
   // 6. Reference stability.
   const cands = s.candidates.filter(t => targetsAll.includes(t))
-  const stability = cands.length >= 2 ? refStability(cands, samples, sampleGroup, L, (smp, t) => cqMap.get(`${smp}|${t}`) ?? null, control) : null
+  // A standard deviation needs two samples in which every candidate has a Cq.
+  const common = samples.filter(x => cands.every(t => cqMap.has(`${x}|${t}`))).length
+  const stabilityNote = cands.length >= 2 && common < 2 ? `Reference genes cannot be ranked: ${cands.join(', ')} ${cands.length > 2 ? 'all' : 'both'} have a Cq in ${common ? 'only one sample' : 'no sample'}, and stability needs at least two.` : undefined
+  if (stabilityNote) warnings.push(stabilityNote)
+  const stability = cands.length >= 2 && !stabilityNote ? refStability(cands, samples, sampleGroup, L, (smp, t) => cqMap.get(`${smp}|${t}`) ?? null, control) : null
   if (cands.length === 2) warnings.push('geNorm pairwise variation and NormFinder need at least three candidate reference genes.')
 
   // 7. Normalisation and statistics.
@@ -270,7 +276,7 @@ export function analyze(plates: Plate[], s: Settings): Analysis {
 
   const excluded = replicates.flatMap(r => r.wells).filter(w => w.excluded).length
   return {
-    replicates, contamination, curves, efficiencies, melt, stability, targets, groups, control, samples, calibration, warnings,
+    replicates, contamination, curves, efficiencies, melt, stability, stabilityNote, targets, groups, control, samples, calibration, warnings,
     counts: {
       wells: allWells.filter(w => w.role !== 'empty').length, excluded,
       outliers: replicates.filter(r => r.flag === 'outlier' || r.flag === 'high-sd').length,

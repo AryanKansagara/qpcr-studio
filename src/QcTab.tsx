@@ -167,7 +167,7 @@ export function RefsTab({ p, a }: { p: Project; a: Analysis }) {
         <div className="table-wrap"><table className="vt compact"><thead><tr><th>Gene</th><th>Candidate</th><th>Use to normalise</th></tr></thead>
           <tbody>{targets.map(g => <tr key={g}><th scope="row"><i>{g}</i></th><td><input type="checkbox" aria-label={`${g} is a candidate`} checked={p.settings.candidates.includes(g)} onChange={e => setCand(g, e.target.checked)} /></td><td><input type="checkbox" aria-label={`Normalise to ${g}`} checked={p.settings.refs.includes(g)} onChange={e => setRef(g, e.target.checked)} /></td></tr>)}</tbody></table></div>
       </div>
-      {!st ? <div className="card pad"><p className="muted">Mark at least two candidates to evaluate stability (three for pairwise variation and NormFinder).</p></div> : <>
+      {!st ? <div className="card pad"><p className={a.stabilityNote ? 'warn-t' : 'muted'}>{a.stabilityNote ?? 'Mark at least two candidates to evaluate stability (three for pairwise variation and NormFinder).'}</p></div> : <>
         <div className={`card pad recommend ${same ? 'ok' : ''}`}>
           <div className="row between wrap gap">
             <div>
