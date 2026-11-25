@@ -1,16 +1,13 @@
 import { useMemo, useState } from 'react'
-import { miqe, wellKey, type Analysis, type Curve, type Replicate } from './engine/qpcr.ts'
+import { isExcluded, miqe, withExclusion, type Analysis, type Curve, type Replicate } from './engine/qpcr.ts'
 import { setSettings, useFigColours } from './Project.tsx'
 import { getProjects, saveProject, type Project } from './store.ts'
 import { fmtCq, fmtP, Link, toast } from './ui.tsx'
 
-/** Toggle a well: manual exclusion for normal wells, re-inclusion for auto-flagged ones. */
-export function toggleWell(p: Project, plateId: string, well: string, auto: boolean) {
-  const k = wellKey(plateId, well)
-  const cur = p.settings.excluded[k]
-  const excluded = cur === true || (auto && cur !== false)
-  const next = { ...p.settings.excluded }
-  if (excluded) { if (auto) next[k] = false; else delete next[k] } else { if (auto) delete next[k]; else next[k] = true }
+/** Toggle a reaction: manual exclusion for normal wells, re-inclusion for auto-flagged ones. */
+export function toggleWell(p: Project, plateId: string, well: string, target: string, auto: boolean) {
+  const excluded = isExcluded(p.settings, plateId, well, target, auto)
+  const next = withExclusion(p.settings.excluded, plateId, well, target, auto, !excluded)
   void setSettings(p, { excluded: next })
   toast(`${well} ${excluded ? 'included' : 'excluded'}.`, { undo: () => void setSettings(p, { excluded: p.settings.excluded }) })
 }
@@ -49,7 +46,7 @@ export default function QcTab({ p, a }: { p: Project; a: Analysis }) {
                   {multi && <td className="small">{plateName(r.plateId)}</td>}
                   <th scope="row">{r.sample}<div className="muted small">{r.group}</div></th><td><i>{r.target}</i></td>
                   <td><div className="cq-chips">{r.wells.map(w => (
-                    <button key={w.well} type="button" className={`cq-chip${w.excluded ? ' out' : ''}${w.auto ? ' auto' : ''}`} disabled={w.cq === null} aria-pressed={!w.excluded} aria-label={`${w.well} Cq ${fmtCq(w.cq)}${w.excluded ? ', excluded' : ''}. Toggle.`} onClick={() => toggleWell(p, r.plateId, w.well, w.auto)}>
+                    <button key={w.well} type="button" className={`cq-chip${w.excluded ? ' out' : ''}${w.auto ? ' auto' : ''}`} disabled={w.cq === null} aria-pressed={!w.excluded} aria-label={`${w.well} Cq ${fmtCq(w.cq)}${w.excluded ? ', excluded' : ''}. Toggle.`} onClick={() => toggleWell(p, r.plateId, w.well, r.target, w.auto)}>
                       <small>{w.well}</small>{fmtCq(w.cq)}
                     </button>))}
                   </div></td>

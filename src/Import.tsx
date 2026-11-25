@@ -3,7 +3,7 @@ import { detect, FIELDS, FORMAT_LABEL, fromSheet, guessMapping, parseDelimited, 
 import { CFX_CSV, GENERIC_CSV, LC480_TXT, QUANTSTUDIO_TXT, ROTORGENE_CSV } from './engine/fixtures.ts'
 import type { Plate } from './engine/qpcr.ts'
 import { PlateMap } from './PlateMap.tsx'
-import { analyze } from './engine/qpcr.ts'
+import { analyze, wellKey } from './engine/qpcr.ts'
 import { autoConfigure, makeSnapshot } from './projectData.ts'
 import { saveProject, uuid, type Project } from './store.ts'
 import { Link, Modal, toast } from './ui.tsx'
@@ -106,7 +106,7 @@ export function ImportWizard({ open, onClose, p }: { open: boolean; onClose(): v
     const plates = [...p.plates, plate]
     let settings = autoConfigure(plates, p.settings)
     // Wells omitted in the instrument software start excluded; they can be put back in QC.
-    if (parsed.omitted.length) settings = { ...settings, excluded: { ...settings.excluded, ...Object.fromEntries(parsed.omitted.map(w => [`${plate.id}|${w}`, true])) } }
+    if (parsed.omittedReactions.length) settings = { ...settings, excluded: { ...settings.excluded, ...Object.fromEntries(parsed.omittedReactions.map(o => [wellKey(plate.id, o.well, o.target), true])) } }
     const next: Project = {
       ...p, plates, settings,
       meta: { ...p.meta, instrument: p.meta.instrument || det?.instrument || '' },

@@ -1,5 +1,5 @@
 import { useRef, type CSSProperties } from 'react'
-import { plateDims, ROLE_LABEL, wellKey, wellName, type Plate, type Settings, type Well } from './engine/qpcr.ts'
+import { isExcluded, plateDims, ROLE_LABEL, wellKey, wellName, type Plate, type Settings, type Well } from './engine/qpcr.ts'
 import { OKABE_ITO } from './figure.ts'
 import { fmtCq } from './ui.tsx'
 
@@ -27,6 +27,7 @@ interface Props {
   settings?: Settings
   colorBy: ColorBy
   selected?: Set<string>
+  /** Keys (wellKey with target) of the reactions flagged automatically. */
   flagged?: Set<string>
   pulse?: Set<string>
   groupOf?: (sample: string) => string
@@ -74,12 +75,14 @@ export function PlateMap({ plate, settings, colorBy, selected, flagged, pulse, g
               const name = wellName(r, c)
               const ws = byWell.get(name) ?? []
               const w = ws[0]
-              const key = wellKey(plate.id, name)
-              const excluded = !!settings && (settings.excluded[key] === true || (flagged?.has(name) && settings.excluded[key] !== false))
+              const isFlagged = (x: Well) => !!flagged?.has(wellKey(plate.id, name, x.target))
+              const out = settings ? ws.filter(x => isExcluded(settings, plate.id, name, x.target, isFlagged(x))) : []
+              const excluded = out.length > 0 || (!w && !!settings && settings.excluded[wellKey(plate.id, name)] === true)
+              const some = (xs: Well[]) => (xs.length < ws.length ? ` (${xs.map(x => x.target || 'no target').join(', ')})` : '')
               const bg = colour(ws)
               const dark = colorBy === 'cq' ? w?.cq != null && (1 - (w.cq - lo) / Math.max(1, hi - lo)) < 0.6 : bg !== 'transparent' && bg !== '#F0E442' && bg !== '#E69F00' && bg !== '#56B4E9'
               const text = !w ? '' : label === 'cq' ? (w.cq === null ? (w.role === 'empty' ? '' : '–') : w.cq.toFixed(1)) : label === 'target' ? w.target.slice(0, 4) : ''
-              const desc = !w ? `${name} empty` : `${name}: ${ws.map(x => `${x.target || 'no target'} ${fmtCq(x.cq)}`).join(', ')}; ${w.sample || 'no sample'}; ${ROLE_LABEL[w.role]}${excluded ? '; excluded' : ''}${flagged?.has(name) ? '; flagged' : ''}`
+              const desc = !w ? `${name} empty` : `${name}: ${ws.map(x => `${x.target || 'no target'} ${fmtCq(x.cq)}`).join(', ')}; ${w.sample || 'no sample'}; ${ROLE_LABEL[w.role]}${out.length ? `; excluded${some(out)}` : ''}${ws.some(isFlagged) ? `; flagged${some(ws.filter(isFlagged))}` : ''}`
               return (
                 <button
                   key={c} type="button" role="gridcell" title={desc} aria-label={desc}

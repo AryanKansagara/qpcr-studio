@@ -67,7 +67,7 @@ test.fail('#16 an efficiency of 1.95 percent is refused', async ({ page }) => {
   await expect(page.getByRole('cell', { name: 'assumed 100%' })).toHaveCount(2, { timeout: 5_000 })
 })
 
-test.fail('#17 omitting one target of a duplex well keeps the other', async ({ page }) => {
+test('#17 omitting one target of a duplex well keeps the other', async ({ page }) => {
   await analyse(page, 'Well\tWell Position\tOmit\tSample Name\tTarget Name\tTask\tCT\n1\tA1\ttrue\tS1\tT\tUNKNOWN\t20\n1\tA1\tfalse\tS1\tR\tUNKNOWN\t18\n', 'qs.txt')
   await openTab(page, 'QC')
   await expect(page.locator('.tile').filter({ hasText: 'Wells excluded' }).locator('b')).toHaveText('1', { timeout: 10_000 })

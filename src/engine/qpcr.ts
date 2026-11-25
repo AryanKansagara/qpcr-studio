@@ -47,7 +47,7 @@ export interface Settings {
   calibrator: string
   /** Sample to biological group overrides. */
   groups: Record<string, string>
-  /** `${plateId}|${well}`: true excludes a well, false forces an auto-flagged well back in. */
+  /** `${plateId}|${well}|${target}`: true excludes a reaction, false forces an auto-flagged one back in. Older projects have `${plateId}|${well}`, which covers every target in the well. */
   excluded: Record<string, boolean>
   groupOrder?: string[]
 }
@@ -83,7 +83,26 @@ export const plateDims = (f: 96 | 384) => (f === 96 ? { rows: 8, cols: 12 } : { 
 /** Index (1-based, row-major) to well name, for instruments that number wells. */
 export const wellFromIndex = (i: number, f: 96 | 384) => { const { cols } = plateDims(f); return wellName(Math.floor((i - 1) / cols), (i - 1) % cols) }
 export const formatFor = (wells: string[]): 96 | 384 => wells.some(w => { const p = parseWell(w); return !!p && (p.row > 7 || p.col > 11) }) ? 384 : 96
-export const wellKey = (plateId: string, well: string) => `${plateId}|${well}`
+export const wellKey = (plateId: string, well: string, target?: string) => `${plateId}|${well}${target === undefined ? '' : `|${target}`}`
+/** What the user decided for a reaction (see Settings.excluded); the reaction's own entry wins over one for the whole well. */
+export const exclusionOf = (s: Pick<Settings, 'excluded'>, plateId: string, well: string, target: string): boolean | undefined => s.excluded[wellKey(plateId, well, target)] ?? s.excluded[wellKey(plateId, well)]
+export const isExcluded = (s: Pick<Settings, 'excluded'>, plateId: string, well: string, target: string, auto: boolean) => { const o = exclusionOf(s, plateId, well, target); return o === true || (auto && o !== false) }
+/** Excludes or includes one reaction; an entry is kept only where it differs from the automatic decision. */
+export function withExclusion(excluded: Settings['excluded'], plateId: string, well: string, target: string, auto: boolean, on: boolean) {
+  const next = { ...excluded }, k = wellKey(plateId, well, target)
+  delete next[k]
+  if (isExcluded({ excluded: next }, plateId, well, target, auto) !== on) next[k] = on
+  return next
+}
+/** Exclusions follow a reaction whose target is renamed. `after` lists the same wells in the same order (new ones at the end). */
+export function moveExclusions(excluded: Settings['excluded'], plateId: string, before: Well[], after: Well[]) {
+  const moved = before.map((w, i) => [wellKey(plateId, w.well, w.target), wellKey(plateId, w.well, after[i].target)]).filter(([a, b]) => a !== b && excluded[a] !== undefined)
+  if (!moved.length) return excluded
+  const next = { ...excluded }
+  for (const [a] of moved) delete next[a]
+  for (const [a, b] of moved) next[b] = next[b] === true || excluded[a]
+  return next
+}
 
 /** "Treated-2", "Treated_2", "Treated 2", "Treated rep2" -> "Treated"; "LPS_6h" stays as it is. */
 export function guessGroup(sample: string) {
@@ -160,7 +179,7 @@ export function analyze(plates: Plate[], s: Settings): Analysis {
   if (s.calibrator && plates.length > 1) {
     const targets = [...new Set(allWells.filter(w => w.sample === s.calibrator && w.cq !== null).map(w => w.target))]
     for (const t of targets) {
-      const per = plates.map(p => ({ p, m: mean(p.wells.filter(w => w.sample === s.calibrator && w.target === t && w.cq !== null && !s.excluded[wellKey(p.id, w.well)]).map(w => w.cq!)) }))
+      const per = plates.map(p => ({ p, m: mean(p.wells.filter(w => w.sample === s.calibrator && w.target === t && w.cq !== null && !exclusionOf(s, p.id, w.well, w.target)).map(w => w.cq!)) }))
       if (per.some(x => isNaN(x.m))) { warnings.push(`Calibrator ${s.calibrator} is missing for ${t} on some plates, so ${t} is not calibrated across plates.`); continue }
       const grand = mean(per.map(x => x.m))
       for (const x of per) { offset.set(`${x.p.id}|${t}`, x.m - grand); calibration.push({ target: t, plateId: x.p.id, offset: x.m - grand }) }
@@ -185,7 +204,7 @@ export function analyze(plates: Plate[], s: Settings): Analysis {
   const curves: Curve[] = []
   const stdTargets = [...new Set(allWells.filter(w => w.role === 'standard').map(w => w.target))]
   for (const t of stdTargets) {
-    const pts = plates.flatMap(p => p.wells.filter(w => w.role === 'standard' && w.target === t && w.cq !== null && (w.quantity ?? 0) > 0 && !s.excluded[wellKey(p.id, w.well)]).map(w => ({ log10q: Math.log10(w.quantity!), cq: w.cq!, well: w.well })))
+    const pts = plates.flatMap(p => p.wells.filter(w => w.role === 'standard' && w.target === t && w.cq !== null && (w.quantity ?? 0) > 0 && !exclusionOf(s, p.id, w.well, w.target)).map(w => ({ log10q: Math.log10(w.quantity!), cq: w.cq!, well: w.well })))
     const c = standardCurve(t, pts)
     if (c) curves.push(c)
     else warnings.push(`Standard curve for ${t} needs at least three dilution points with a Cq.`)
@@ -269,9 +288,8 @@ function aggregate(plateId: string, ws: Well[], s: Settings, all: Well[], adj: (
     if (idx >= 0) valid[idx].auto = true
   }
   for (const r of rows) {
-    const o = s.excluded[wellKey(plateId, r.well)]
-    r.manual = o !== undefined
-    r.excluded = o === true || (r.auto && o !== false)
+    r.manual = exclusionOf(s, plateId, r.well, ws[0].target) !== undefined
+    r.excluded = isExcluded(s, plateId, r.well, ws[0].target, r.auto)
   }
   const used = rows.filter(r => r.cq !== null && !r.excluded).map(r => r.cq!)
   const m = used.length ? mean(used) : null
@@ -305,7 +323,7 @@ function contaminationChecks(plates: Plate[], s: Settings, reps: Replicate[], ad
     const cq = adj(p.id, w)
     const tReps = reps.filter(r => r.target === w.target && r.mean !== null)
     // A dilution-series plate has no samples: its NTC is judged against the standards.
-    const stds = tReps.length ? [] : plates.flatMap(q => q.wells.filter(x => x.role === 'standard' && x.target === w.target && x.cq !== null && !s.excluded[wellKey(q.id, x.well)]).map(x => ({ cq: adj(q.id, x)!, tm: x.tm })))
+    const stds = tReps.length ? [] : plates.flatMap(q => q.wells.filter(x => x.role === 'standard' && x.target === w.target && x.cq !== null && !exclusionOf(s, q.id, x.well, x.target)).map(x => ({ cq: adj(q.id, x)!, tm: x.tm })))
     const productTm = median(tReps.length ? tReps.flatMap(r => r.wells.filter(x => !x.excluded && x.tm != null).map(x => x.tm!)) : stds.filter(x => x.tm != null).map(x => x.tm!))
     let ref: number | null = null
     if (w.role === 'ntc') ref = tReps.length ? Math.max(...tReps.map(r => r.mean!)) : stds.length ? Math.max(...stds.map(x => x.cq)) : null

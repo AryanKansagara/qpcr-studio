@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { analyze, wellKey } from './engine/qpcr.ts'
+import { analyze, isExcluded, wellKey, withExclusion } from './engine/qpcr.ts'
 import { SAMPLES } from './engine/sample.ts'
 import { foldFigure } from './figure.ts'
 import { CqLegend, PlateMap } from './PlateMap.tsx'
@@ -18,24 +18,18 @@ function Hero() {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
   const settings = useMemo(() => ({ ...sample.settings, refs: REF_SETS.find(r => r.id === refSet)!.refs, excluded: overrides }), [sample, refSet, overrides])
   const a = useMemo(() => analyze(sample.plates, settings), [sample, settings])
-  const flagged = useMemo(() => new Set(a.replicates.flatMap(r => r.wells.filter(w => w.auto).map(w => w.well))), [a])
+  const flagged = useMemo(() => new Set(a.replicates.flatMap(r => r.wells.filter(w => w.auto).map(w => wellKey(r.plateId, w.well, r.target)))), [a])
   const outlier = a.replicates.find(r => r.flag === 'outlier')
   const outWell = outlier?.wells.find(w => w.auto)
-  const outKey = outWell ? wellKey(plate.id, outWell.well) : ''
+  const outKey = outWell ? wellKey(plate.id, outWell.well, outlier!.target) : ''
   const outIn = outKey && overrides[outKey] === false
   const pulse = useMemo(() => new Set(outWell && !outIn ? [outWell.well] : []), [outWell, outIn])
   const svg = useMemo(() => foldFigure(a.targets.filter(t => t.target !== 'GAPDH' && t.target !== 'ACTB' && t.target !== 'HPRT1'), { kind: 'bar', groups: a.groups, control: a.control, ink: '#f5f2ee', muted: '#a8a5a0', grid: '#363534', width: 300 }), [a])
   const toggle = (well: string) => {
     const w = plate.wells.find(x => x.well === well)
     if (!w || w.role !== 'unknown') return
-    const k = wellKey(plate.id, well)
-    const isAuto = flagged.has(well)
-    setOverrides(o => {
-      const n = { ...o }
-      const excluded = o[k] === true || (isAuto && o[k] !== false)
-      if (excluded) { if (isAuto) n[k] = false; else delete n[k] } else { if (isAuto) delete n[k]; else n[k] = true }
-      return n
-    })
+    const isAuto = flagged.has(wellKey(plate.id, well, w.target))
+    setOverrides(o => withExclusion(o, plate.id, well, w.target, isAuto, !isExcluded({ excluded: o }, plate.id, well, w.target, isAuto)))
   }
   const contam = a.contamination.find(c => c.status === 'fail')
 
