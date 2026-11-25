@@ -141,8 +141,8 @@ export const qdunnett = (p: number, lambdas: number[], df: number) => invert(c =
 
 export interface TwoGroup { diff: number; se: number; df: number; stat: number; p: number | null; lo: number; hi: number }
 
-/** Spread below this (in cycles) is rounding noise: the values are constant. */
-const CONSTANT = 1e-9
+/** Differences up to this (in cycles) are rounding noise: 28.1 - 18 is not quite 28.2 - 18.1. */
+const NOISE = 1e-9
 
 /** Welch two-sample t-test of mean(a) - mean(b) with a 95% CI. Without variance there is no test: p is null and the CI NaN (R: "data are essentially constant"). */
 export function welch(a: number[], b: number[], conf = 0.95): TwoGroup {
@@ -150,20 +150,20 @@ export function welch(a: number[], b: number[], conf = 0.95): TwoGroup {
   const se = Math.sqrt(va + vb)
   const df = (va + vb) ** 2 / (va ** 2 / (a.length - 1) + vb ** 2 / (b.length - 1))
   const diff = mean(a) - mean(b)
-  if (!(se > CONSTANT)) return { diff, se, df: NaN, stat: NaN, p: null, lo: NaN, hi: NaN }
+  if (!(se > NOISE)) return { diff, se, df: NaN, stat: NaN, p: null, lo: NaN, hi: NaN }
   const stat = diff / se
   const tc = tQuantile(1 - (1 - conf) / 2, df)
   return { diff, se, df, stat, p: tTwoSided(stat, df), lo: diff - tc * se, hi: diff + tc * se }
 }
 
-/** Mann-Whitney U (two-sided). Exact when there are no ties and both groups have 12 or fewer values. */
+/** Mann-Whitney U (two-sided). Exact when there are no ties (values within rounding noise are equal) and both groups have 12 or fewer values. */
 export function mannWhitney(a: number[], b: number[]) {
   const all = [...a.map(v => ({ v, g: 0 })), ...b.map(v => ({ v, g: 1 }))].sort((x, y) => x.v - y.v)
   const ranks = new Array(all.length)
   let ties = false, tieTerm = 0
   for (let i = 0; i < all.length;) {
     let j = i
-    while (j + 1 < all.length && all[j + 1].v === all[i].v) j++
+    while (j + 1 < all.length && all[j + 1].v - all[i].v <= NOISE) j++
     const t = j - i + 1
     if (t > 1) { ties = true; tieTerm += t ** 3 - t }
     for (let k = i; k <= j; k++) ranks[k] = (i + j) / 2 + 1
@@ -214,7 +214,7 @@ export function anova(groups: number[][]): Anova {
   const df1 = groups.length - 1, df2 = all.length - groups.length
   const mse = ssw / df2
   const f = ssb / df1 / mse
-  return { f, df1, df2, p: mse > CONSTANT ** 2 ? fSurvival(f, df1, df2) : null, mse }
+  return { f, df1, df2, p: mse > NOISE ** 2 ? fSurvival(f, df1, df2) : null, mse }
 }
 
 /** Grubbs two-sided test for a single outlier. Returns the index, G and the critical G. */
