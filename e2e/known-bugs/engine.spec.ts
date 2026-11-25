@@ -49,7 +49,7 @@ test('#13 calibrator wells excluded as outliers do not shift plates', () => {
   for (const c of a.calibration) expect(c.offset).toBeCloseTo(0, 9)
 })
 
-test.fail('#14 no reference recommendation from one sample', () => {
+test('#14 no reference recommendation from one sample', () => {
   const a = analyze(plate1([['C-1', 'R', 18], ['C-1', 'R2', 22], ['C-1', 'T', 28]]), S({ candidates: ['R', 'R2'] }))
   expect(a.stability).toBeNull()
 })
