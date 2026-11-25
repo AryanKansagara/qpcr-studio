@@ -361,7 +361,8 @@ export function refStability(genes: string[], samples: string[], groupOf: Map<st
   const stable = ranking.filter(g => mAtExit[g] < 0.5)
   const recommended = ranking.slice(0, Math.max(2, Math.min(optimal, stable.length || 2)))
 
-  // NormFinder-style: intragroup variance and shrunk intergroup variation, combined into a stability value.
+  // NormFinder (Andersen 2004): intragroup variance and shrunk intergroup difference, combined as mean over groups of |d| + sqrt(var).
+  // Checked against stabMeasureRho of Bioconductor NormqPCR.
   let normfinder: Stability['normfinder'] = null
   const grp = [...new Set(usable.map(x => groupOf.get(x)!))]
   const byG = grp.map(g => usable.filter(x => groupOf.get(x) === g)).filter(xs => xs.length >= 2)
@@ -369,8 +370,8 @@ export function refStability(genes: string[], samples: string[], groupOf: Map<st
   if (k >= 3 && byG.length >= 1) {
     const sig: number[][] = genes.map(() => [])
     const dvals: number[][] = genes.map(() => [])
-    const all = byG.flat()
-    const gene = genes.map(g => mean(all.map(x => val(x, g))))
+    // Each gene is centred on the mean of its group means, so larger groups do not weigh more.
+    const gene = genes.map(g => mean(byG.map(xs => mean(xs.map(x => val(x, g))))))
     const tot = mean(gene)
     byG.forEach((xs, gi) => {
       const ig = genes.map(g => mean(xs.map(x => val(x, g))))
@@ -379,7 +380,7 @@ export function refStability(genes: string[], samples: string[], groupOf: Map<st
       const raw = genes.map((g, i) => xs.reduce((acc, x, j) => acc + (val(x, g) - ig[i] - sj[j] + gg) ** 2, 0) / (xs.length - 1))
       const rs = raw.reduce((a, b) => a + b, 0)
       genes.forEach((_, i) => {
-        sig[i][gi] = Math.max(1e-6, (raw[i] - rs / (k * (k - 1))) / (1 - 2 / k))
+        sig[i][gi] = Math.max(0, (raw[i] - rs / (k * (k - 1))) / (1 - 2 / k))
         dvals[i][gi] = ig[i] - gene[i] - gg + tot
       })
     })
@@ -394,7 +395,7 @@ export function refStability(genes: string[], samples: string[], groupOf: Map<st
           const sn = sig[i][gi] / xs.length
           const shrink = gamma2 + sn > 0 ? gamma2 / (gamma2 + sn) : 0
           const dt = shrink * dvals[i][gi]
-          return Math.sqrt(dt * dt + (gamma2 * sn) / (gamma2 + sn || 1) + sn)
+          return Math.abs(dt) + Math.sqrt(sn + (gamma2 * sn) / (gamma2 + sn || 1))
         })
         stability[g] = mean(per)
       })
