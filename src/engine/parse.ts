@@ -192,14 +192,23 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
   const get = (r: Row, f: Field) => (m[f] === undefined ? '' : r.cells[m[f]!] ?? '')
   const body = rows.slice(headerIndex + 1)
   const blank = (r: Row) => r.cells.every(c => !c)
+  const section = (r: Row) => /^\[.*\]$/.test(r.cells[0] ?? '')
+  // Positions are plain numbers only in a table that starts with one, so a numeric footer is not taken for a well.
+  const counted = /^\d+$/.test(get(body.find(r => !blank(r)) ?? { line: 0, cells: [] }, 'well'))
+  const hasWell = (r: Row) => { const w = get(r, 'well'); return r.cells.filter(Boolean).length > 1 && (!!parseWell(w) || (counted && /^\d+$/.test(w) && +w >= 1 && +w <= 384)) }
   // The table ends at the next [section], or at a blank row followed by a footer (key/value lines) or nothing.
   const end = body.findIndex((r, i) => {
-    if (/^\[.*\]$/.test(r.cells[0] ?? '')) return true
+    if (section(r)) return true
     if (!blank(r)) return false
     const next = body.slice(i + 1).find(x => !blank(x))
-    return !next || next.cells.filter(Boolean).length < 3 || /^\[.*\]$/.test(next.cells[0] ?? '')
+    return !next || (next.cells.filter(Boolean).length < 3 && !hasWell(next)) || section(next)
   })
   const data = end >= 0 ? body.slice(0, end) : body
+  // Wells below the footer are not read: say so instead of dropping them.
+  const rest = end >= 0 ? body.slice(end) : []
+  const stop = rest.findIndex(section)
+  const unread = (stop >= 0 ? rest.slice(0, stop) : rest).filter(hasWell)
+  if (unread.length) issues.push({ line: unread[0].line, level: 'error', msg: `${unread.length} row${unread.length > 1 ? 's' : ''} from here on look${unread.length > 1 ? '' : 's'} like wells but ${unread.length > 1 ? 'were' : 'was'} not read: the table ends at the blank line ${body[end].line}. Remove the text between them, or import them separately.` })
   const num = numberReader(data.map(r => get(r, 'quantity')), data.flatMap(r => [get(r, 'cq'), get(r, 'tm')]))
   const header = (rows[headerIndex]?.cells ?? []).map(h => cleanHeader(h).toLowerCase())
   const dyeCol = header.findIndex(h => /^(fluor|reporter|dye)$/.test(h))
