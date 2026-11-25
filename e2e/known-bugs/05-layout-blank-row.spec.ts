@@ -1,6 +1,6 @@
 import { choose, commitImport, expect, newExperiment, test } from '../fixtures'
 
-test.fail('#5 a blank row in a pasted layout keeps its place', async ({ page }) => {
+test('#5 a blank row in a pasted layout keeps its place', async ({ page }) => {
   await newExperiment(page)
   await choose(page, { name: 'r.csv', text: 'well,cq\nA1,20\nB1,21\nC1,22\n' })
   await commitImport(page)

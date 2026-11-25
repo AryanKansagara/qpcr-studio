@@ -308,16 +308,36 @@ export function parseRdml(xml: string): RdmlRun[] {
  * Returns well -> value.
  */
 export function parseLayout(text: string): Map<string, string> {
-  const rows = text.replace(/\r/g, '').split('\n').filter(l => l.trim()).map(l => l.split('\t'))
+  const rows = text.replace(/\r\n?/g, '\n').split('\n').map(l => l.split('\t').map(c => c.trim()))
+  const blank = (r: string[]) => r.every(c => !c)
+  while (rows.length && blank(rows[rows.length - 1])) rows.pop()
   const out = new Map<string, string>()
   if (!rows.length) return out
-  let r0 = 0
-  if (rows[0].filter(c => /^\s*\d{1,2}\s*$/.test(c)).length >= Math.min(3, rows[0].length)) r0 = 1
-  const hasRowLabels = rows.slice(r0).every(r => /^\s*[A-Pa-p]\s*$/.test(r[0] ?? ''))
-  rows.slice(r0).forEach((r, ri) => {
-    const cells = hasRowLabels ? r.slice(1) : r
-    const rowIdx = hasRowLabels ? r[0].trim().toUpperCase().charCodeAt(0) - 65 : ri
-    cells.forEach((c, ci) => { if (c.trim() && ci < 24 && rowIdx < 16) out.set(String.fromCharCode(65 + rowIdx) + (ci + 1), c.trim()) })
+  const label = (c: string) => (/^[A-Pa-p]$/.test(c) ? c.toUpperCase().charCodeAt(0) - 65 : -1)
+  const labelled = (rs: string[][]) => {
+    const l = rs.filter(r => !blank(r))
+    return l.some(r => r.length > 1) && l.every(r => label(r[0]) >= 0) && new Set(l.map(r => label(r[0]))).size === l.length
+  }
+  // Column numbers: 1, 2, 3, ... (any ascending run beside row labels). Other numbers in the first row are values.
+  const h = rows.findIndex(r => !blank(r))
+  const body = rows.slice(h + 1)
+  // The corner is empty, or a caption such as "<>" above row labels.
+  const corner = !rows[h][0] || (!/^\d/.test(rows[h][0]) && label(rows[h][0]) < 0 && rows[h].length > 1 && labelled(body))
+  const heads = (corner ? rows[h].slice(1) : rows[h]).filter((c, i, all) => c || all.slice(i).some(Boolean)).map(c => (/^\d{1,2}$/.test(c) ? +c : NaN))
+  const counted = heads.every((n, i) => n === i + 1)
+  const ascending = heads.every((n, i) => n >= 1 && n <= 24 && (i === 0 || n > heads[i - 1]))
+  const header = body.length > 0 && heads.length > 0 && (corner ? counted || (ascending && labelled(body)) : counted && heads.length >= 3)
+  const data = header ? body : rows
+  const hasRowLabels = labelled(data)
+  data.forEach((r, ri) => {
+    if (blank(r)) return
+    // A corner cell without row labels under it leaves an empty first column.
+    const cells = hasRowLabels || (header && corner && data.every(x => !x[0])) ? r.slice(1) : r
+    const rowIdx = hasRowLabels ? label(r[0]) : ri
+    cells.forEach((c, i) => {
+      const ci = header && corner && hasRowLabels ? (heads[i] ?? NaN) - 1 : i
+      if (c && ci < 24 && rowIdx < 16) out.set(String.fromCharCode(65 + rowIdx) + (ci + 1), c)
+    })
   })
   return out
 }
