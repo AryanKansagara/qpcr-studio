@@ -139,17 +139,21 @@ export const qdunnett = (p: number, lambdas: number[], df: number) => invert(c =
 
 // ---------- Tests ----------
 
-export interface TwoGroup { diff: number; se: number; df: number; stat: number; p: number; lo: number; hi: number }
+export interface TwoGroup { diff: number; se: number; df: number; stat: number; p: number | null; lo: number; hi: number }
 
-/** Welch two-sample t-test of mean(a) - mean(b) with a 95% CI. */
+/** Spread below this (in cycles) is rounding noise: the values are constant. */
+const CONSTANT = 1e-9
+
+/** Welch two-sample t-test of mean(a) - mean(b) with a 95% CI. Without variance there is no test: p is null and the CI NaN (R: "data are essentially constant"). */
 export function welch(a: number[], b: number[], conf = 0.95): TwoGroup {
   const va = variance(a) / a.length, vb = variance(b) / b.length
   const se = Math.sqrt(va + vb)
   const df = (va + vb) ** 2 / (va ** 2 / (a.length - 1) + vb ** 2 / (b.length - 1))
   const diff = mean(a) - mean(b)
+  if (!(se > CONSTANT)) return { diff, se, df: NaN, stat: NaN, p: null, lo: NaN, hi: NaN }
   const stat = diff / se
   const tc = tQuantile(1 - (1 - conf) / 2, df)
-  return { diff, se, df, stat, p: se > 0 ? tTwoSided(stat, df) : diff === 0 ? 1 : 0, lo: diff - tc * se, hi: diff + tc * se }
+  return { diff, se, df, stat, p: tTwoSided(stat, df), lo: diff - tc * se, hi: diff + tc * se }
 }
 
 /** Mann-Whitney U (two-sided). Exact when there are no ties and both groups have 12 or fewer values. */
@@ -201,7 +205,7 @@ function uDistribution(n1: number, n2: number): number[] {
   return f(n1, n2)
 }
 
-export interface Anova { f: number; df1: number; df2: number; p: number; mse: number }
+export interface Anova { f: number; df1: number; df2: number; p: number | null; mse: number }
 export function anova(groups: number[][]): Anova {
   const all = groups.flat()
   const gm = mean(all)
@@ -210,7 +214,7 @@ export function anova(groups: number[][]): Anova {
   const df1 = groups.length - 1, df2 = all.length - groups.length
   const mse = ssw / df2
   const f = ssb / df1 / mse
-  return { f, df1, df2, p: mse > 0 ? fSurvival(f, df1, df2) : ssb > 0 ? 0 : 1, mse }
+  return { f, df1, df2, p: mse > CONSTANT ** 2 ? fSurvival(f, df1, df2) : null, mse }
 }
 
 /** Grubbs two-sided test for a single outlier. Returns the index, G and the critical G. */
