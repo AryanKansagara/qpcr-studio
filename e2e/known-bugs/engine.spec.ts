@@ -4,7 +4,7 @@ import { mannWhitney } from '../../src/engine/stats.ts'
 import { resultsCsv } from '../../src/exports.ts'
 import { analyse, choose, commitImport, expect, fillAndLeave, HAND, newExperiment, openTab, test } from '../fixtures'
 
-// Open bugs, one per issue. Each is an expected failure until its fix turns it into a normal test.
+// One test per fixed issue.
 const well = (w: string, sample: string, target: string, cq: number | null): Well => ({ well: w, sample, target, role: 'unknown', cq })
 const plate = (id: string, wells: Well[]): Plate => ({ id, name: id, format: 96, instrument: '', wells })
 const plate1 = (rows: [string, string, number | null][]) => [plate('p', rows.map(([s, t, c], i) => well(`${'ABCDEFGH'[i / 12 | 0]}${i % 12 + 1}`, s, t, c)))]
@@ -38,7 +38,7 @@ test('#11 small p-values and folds keep significant digits', () => {
   expect(cells[6]).toBeCloseTo(0.00012207, 8)
 })
 
-test.fail('#12 a formula in a name is neutralised in CSV', () => {
+test('#12 a formula in a name is neutralised in CSV', () => {
   expect(csvCell('=1+1')).not.toMatch(/^=/)
 })
 

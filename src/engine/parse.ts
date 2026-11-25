@@ -412,8 +412,10 @@ export function parseLayout(text: string): Map<string, string> {
 
 // ---------- Exports ----------
 
+/** Text a spreadsheet would run as a formula gets a leading apostrophe (OWASP, CSV injection). Numbers, also as text, are safe as they are. */
 export const csvCell = (v: unknown) => {
-  const s = v === null || v === undefined ? '' : String(v)
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  const raw = v === null || v === undefined ? '' : String(v)
+  const s = typeof v !== 'number' && /^[=+\-@\t\r\n＝＋－＠]/.test(raw) && !/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(raw) ? `'${raw}` : raw
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 export const toCsv = (rows: unknown[][]) => rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n'
