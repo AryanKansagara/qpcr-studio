@@ -15,7 +15,7 @@ test('#8 samples left out of a fold change are named', () => {
   expect(a.warnings.join(' ')).toContain('X-3')
 })
 
-test.fail('#9 a pasted Cq of 0 is no amplification', async ({ page }) => {
+test('#9 a pasted Cq of 0 is no amplification', async ({ page }) => {
   await newExperiment(page)
   await choose(page, { name: 'r.csv', text: 'well,sample,target,cq\nA1,S1,T,20\n' })
   await commitImport(page)

@@ -181,6 +181,29 @@ export function numberReader(quantities: string[], cqs: string[]) {
   }
 }
 
+/** The rule for one Cq cell, shared by file import and pasted layouts. */
+function readCq(raw: string, well: string, num: (raw: string) => number): { cq: number | null; warn?: string; error?: string } {
+  if (UNDET.test(raw.trim())) return { cq: null }
+  const v = num(raw)
+  if (isNaN(v)) return { cq: null, error: `Cq "${raw}" in ${well} is not a number.` }
+  // Sentinels such as 0, -1 or 100 are how some software writes "no amplification".
+  if (v <= 0 || v > 50) return { cq: null, warn: `Cq ${v} in ${well} is outside 0 to 50; read as no amplification.` }
+  return { cq: v, warn: v > 40 ? `Cq ${v} in ${well} is above 40: at or past the reliable detection limit.` : undefined }
+}
+
+/** Cq values from a pasted layout: text is reported and left out, so the well keeps its Cq. */
+export function readPastedCqs(layout: Map<string, string>) {
+  const num = numberReader([], [...layout.values()])
+  const cqs = new Map<string, number | null>(), errors: string[] = [], warnings: string[] = []
+  for (const [well, raw] of layout) {
+    const r = readCq(raw, well, num)
+    if (r.error) { errors.push(`${r.error} Well skipped.`); continue }
+    if (r.warn) warnings.push(r.warn)
+    cqs.set(well, r.cq)
+  }
+  return { cqs, errors, warnings }
+}
+
 export interface ParseOptions { defaultTarget?: string; numbered?: boolean }
 export interface ParseResult { wells: Well[]; issues: Issue[]; format: 96 | 384; skipped: number; /** Wells the instrument software had omitted (QuantStudio Omit, LightCycler Include). */ omitted: string[]; /** The same, per reaction: one target of a duplex well can be omitted on its own. */ omittedReactions: { well: string; target: string }[] }
 
@@ -229,16 +252,10 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
     if (parseWell(rawWell)) well = normWell(rawWell)
     else if ((opts.numbered || /^\d+$/.test(rawWell)) && num(rawWell) >= 1 && num(rawWell) <= 384) well = wellFromIndex(num(rawWell), numberedFormat)
     if (!well) { issues.push({ line: r.line, level: 'error', msg: rawWell ? `Unrecognised well "${rawWell}". Expected A1 to P24 or a position number.` : 'Missing well. Row skipped.' }); skipped++; continue }
-    const rawCq = get(r, 'cq')
-    let cq: number | null = null
-    if (!UNDET.test(rawCq.trim())) {
-      const v = num(rawCq)
-      if (isNaN(v)) { issues.push({ line: r.line, level: 'error', msg: `Cq "${rawCq}" in ${well} is not a number. Row skipped.` }); skipped++; continue }
-      cq = v
-      // Sentinels such as 0, -1 or 100 are how some software writes "no amplification".
-      if (v <= 0 || v > 50) { cq = null; issues.push({ line: r.line, level: 'warn', msg: `Cq ${v} in ${well} is outside 0 to 50; read as no amplification.` }) }
-      else if (v > 40) issues.push({ line: r.line, level: 'warn', msg: `Cq ${v} in ${well} is above 40: at or past the reliable detection limit.` })
-    }
+    const read = readCq(get(r, 'cq'), well, num)
+    if (read.error) { issues.push({ line: r.line, level: 'error', msg: `${read.error} Row skipped.` }); skipped++; continue }
+    const cq = read.cq
+    if (read.warn) issues.push({ line: r.line, level: 'warn', msg: read.warn })
     const sample = get(r, 'sample')
     const role = m.role !== undefined ? parseRole(get(r, 'role'), sample) : parseRole('', sample)
     const byName = (role === 'ntc' || role === 'nrt') && parseRole(m.role === undefined ? '' : get(r, 'role'), '') === 'unknown'

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { parseLayout } from './engine/parse.ts'
+import { parseLayout, readPastedCqs } from './engine/parse.ts'
 import { groupOf, moveExclusions, plateDims, ROLE_LABEL, ROLES, wellKey, wellName, withExclusion, type Analysis, type Plate, type Role, type Well } from './engine/qpcr.ts'
 import { ImportWizard } from './Import.tsx'
 import { CatLegend, CqLegend, PlateMap, roleLegend, type ColorBy } from './PlateMap.tsx'
@@ -163,17 +163,17 @@ export default function PlateTab({ p, a }: { p: Project; a: Analysis }) {
             </form>
           )}
         </div>
-        <PasteLayout plate={plate} onApply={(field, map) => {
+        <PasteLayout plate={plate} onApply={(field, map, cqs, skipped) => {
           const existing = new Set(plate.wells.map(w => w.well))
           const created: Well[] = [...map.keys()].filter(w => !existing.has(w)).map(w => ({ well: w, sample: '', target: '', role: 'unknown', cq: null }))
           const wells = [...plate.wells, ...created].map(w => {
             const v = map.get(w.well)
             if (v === undefined) return w
-            if (field === 'cq') { const n = Number(v.replace(',', '.')); return { ...w, cq: /^(undetermined|nan|n\/a|-)$/i.test(v) ? null : isFinite(n) ? n : w.cq } }
+            if (field === 'cq') return { ...w, cq: cqs.get(w.well)! }
             if (field === 'role') { const r = ROLES.find(x => x === v.toLowerCase() || ROLE_LABEL[x].toLowerCase() === v.toLowerCase()) ?? (/ntc/i.test(v) ? 'ntc' : /nrt|rt-/i.test(v) ? 'nrt' : /std|standard/i.test(v) ? 'standard' : 'unknown'); return { ...w, role: r } }
             return { ...w, [field]: v }
           })
-          updatePlate({ ...plate, wells }, `Pasted ${map.size} ${field} values.`)
+          updatePlate({ ...plate, wells }, `Pasted ${map.size} ${field} values.${skipped ? ` ${skipped} could not be read and ${skipped === 1 ? 'was' : 'were'} skipped.` : ''}`)
         }} />
       </div>
 
@@ -192,20 +192,23 @@ export default function PlateTab({ p, a }: { p: Project; a: Analysis }) {
   )
 }
 
-function PasteLayout({ plate, onApply }: { plate: Plate; onApply(field: LayoutField, m: Map<string, string>): void }) {
+function PasteLayout({ plate, onApply }: { plate: Plate; onApply(field: LayoutField, m: Map<string, string>, cqs: Map<string, number | null>, skipped: number): void }) {
   const [text, setText] = useState('')
   const [field, setField] = useState<LayoutField>('sample')
-  const map = useMemo(() => parseLayout(text), [text])
+  const layout = useMemo(() => parseLayout(text), [text])
+  const { cqs, errors, warnings } = useMemo(() => readPastedCqs(field === 'cq' ? layout : new Map()), [layout, field])
+  const map = field === 'cq' ? new Map([...layout].filter(([w]) => cqs.has(w))) : layout
   const { rows, cols } = plateDims(plate.format)
-  const outside = [...map.keys()].filter(w => w.charCodeAt(0) - 65 >= rows || +w.slice(1) > cols)
+  const outside = [...layout.keys()].filter(w => w.charCodeAt(0) - 65 >= rows || +w.slice(1) > cols)
   return (
     <div className="card pad stack">
       <h2 className="h4">Paste a layout from your spreadsheet</h2>
       <p className="muted small">Copy a block shaped like the plate ({rows} rows × {cols} columns), with or without the A–{String.fromCharCode(64 + rows)} and 1–{cols} labels, and paste it here.</p>
       <label className="field"><span>Fills</span><select value={field} onChange={e => setField(e.target.value as LayoutField)}><option value="sample">Sample names</option><option value="target">Targets</option><option value="group">Biological groups</option><option value="role">Roles (Sample, NTC, NRT, Standard)</option><option value="cq">Cq values</option></select></label>
       <textarea className="mono" rows={6} value={text} onChange={e => setText(e.target.value)} aria-label="Pasted plate layout" placeholder={'\t1\t2\t3\nA\tVehicle-1\tVehicle-1\tVehicle-1\nB\tTreated-1\tTreated-1\tTreated-1'} />
-      <p className="small muted">{map.size ? `${map.size} wells will be filled${outside.length ? `; ${outside.length} fall outside a ${plate.format}-well plate` : ''}.` : 'Nothing pasted yet.'}</p>
-      <div><button type="button" className="btn outline sm" disabled={!map.size || outside.length > 0} onClick={() => { onApply(field, map); setText('') }}>Apply to plate</button></div>
+      <p className="small muted">{map.size ? `${map.size} wells will be filled${outside.length ? `; ${outside.length} fall outside a ${plate.format}-well plate` : ''}.` : layout.size ? 'No Cq values that can be read.' : 'Nothing pasted yet.'}</p>
+      {errors.length + warnings.length > 0 && <ul className="issues">{errors.map(m => <li key={m} className="error">{m}</li>)}{warnings.map(m => <li key={m} className="warn">{m}</li>)}</ul>}
+      <div><button type="button" className="btn outline sm" disabled={!map.size || outside.length > 0} onClick={() => { onApply(field, map, cqs, errors.length); setText('') }}>Apply to plate</button></div>
     </div>
   )
 }
