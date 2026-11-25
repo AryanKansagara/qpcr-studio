@@ -132,17 +132,21 @@ export function unsupportedReason(rows: Row[]): string | null {
 
 const UNDET = /^(undetermined|nan|n\/a|na|no ct|no cq|-|—|)$/i
 
+// Control wells recognised by name. Whole names, not prefixes: H2O2 is a treatment, a negative siRNA or "Northern-1" is a sample.
+const NTC_NAME = /^\s*(ntc(?![\s_-]*(si|sh|sg|g)rna)|no[\s_-]?template|((h2o|(nuclease[\s_-]*free[\s_-]*)?water)([\s_-]+\d{1,2})?|water\d{1,2}|neg(ative)?\.?|neg[\s_-]*c|(h2o|water|neg(ative)?)[\s_-]*(ctrl|control)([\s_-]*\d{1,2})?)\s*$|.*\(ntc\)\s*$)/i
+const NRT_NAME = /^\s*(nrt|-rt|no[\s_-]?rt)(?=$|[^a-z]|ctrl|control)/i
+
 export function parseRole(raw: string, sample: string): Role {
   const v = raw.trim().toLowerCase().replace(/[-_ ]?\d+$/, '')
-  if (/^(unkn|unknown|sample|unk)$/.test(v)) return /^(ntc|h2o|water|neg)/i.test(sample) ? 'ntc' : 'unknown'
+  if (/^(unkn|unknown|sample|unk)$/.test(v)) return NTC_NAME.test(sample) ? 'ntc' : 'unknown'
   if (/^(std|standard)$/.test(v)) return 'standard'
   if (/^(ntc|no template( control)?|neg ctrl|negative( control)?|negative)$/.test(v)) return 'ntc'
   if (/^(nrt|no rt|-rt|nac|no amplification control|rt-)$/.test(v)) return 'nrt'
   if (/^(irc|calibrator|inter-?run calibrator)$/.test(v)) return 'calibrator'
   if (/^(empty|none)$/.test(v)) return 'empty'
   if (/^(pos ctrl|positive( control)?)$/.test(v)) return 'unknown'
-  if (/^(ntc|h2o|water|neg)/i.test(sample)) return 'ntc'
-  if (/^(nrt|-rt|no ?rt)/i.test(sample)) return 'nrt'
+  if (NTC_NAME.test(sample)) return 'ntc'
+  if (NRT_NAME.test(sample)) return 'nrt'
   return 'unknown'
 }
 
@@ -204,6 +208,7 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
   let emptyWells = 0, dyeAsTarget = false
   const fromName: Well[] = []
   const undecided: string[] = []
+  const roleFromName: string[] = []
   const noTarget: string[] = [], noSample: string[] = [], stdNoQty: string[] = []
   const list = (w: string[]) => `${w.length} well${w.length > 1 ? 's' : ''} (${w.slice(0, 6).join(', ')}${w.length > 6 ? ', ...' : ''})`
   const idxMax = Math.max(0, ...data.map(r => num(get(r, 'well'))).filter(isFinite))
@@ -227,6 +232,7 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
     }
     const sample = get(r, 'sample')
     const role = m.role !== undefined ? parseRole(get(r, 'role'), sample) : parseRole('', sample)
+    const byName = (role === 'ntc' || role === 'nrt') && parseRole(m.role === undefined ? '' : get(r, 'role'), '') === 'unknown'
     // Unused wells that the software still lists (no sample, nothing amplified) are not part of the experiment.
     if (role === 'unknown' && !sample && cq === null) { emptyWells++; continue }
     let target = get(r, 'target') || opts.defaultTarget || ''
@@ -249,6 +255,7 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
     // The quantity column of other wells is the software's own interpolation, not an input.
     if (finalRole !== 'standard') quantity = null
     if ((omitCol >= 0 && /^true$/i.test(r.cells[omitCol] ?? '')) || (includeCol >= 0 && /^false$/i.test(r.cells[includeCol] ?? ''))) omitted.push(well)
+    if (byName) roleFromName.push(`${well} ${sample}`)
     if (!target) noTarget.push(well)
     if (finalRole === 'unknown' && !sample) noSample.push(well)
     if (finalRole === 'standard' && !(quantity! > 0) && !named) stdNoQty.push(well)
@@ -271,6 +278,7 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
     else for (const w of fromName) { w.quantity = null; stdNoQty.push(w.well) }
   }
   if (undecided.length) issues.push({ line: at, level: 'warn', msg: `Quantities could be thousands or decimals (${undecided.slice(0, 4).join(', ')}${undecided.length > 4 ? ', ...' : ''}) and were not read. Write them without separators, or enter them in the plate map.` })
+  if (roleFromName.length) issues.push({ line: at, level: 'warn', msg: `Read as NTC or no-RT controls because of their names: ${roleFromName.slice(0, 6).join(', ')}${roleFromName.length > 6 ? ', ...' : ''}. If they are samples, change the role in the plate map.` })
   if (noTarget.length) issues.push({ line: at, level: 'warn', msg: `No target for ${list(noTarget)}. Assign it in the plate map.` })
   if (noSample.length) issues.push({ line: at, level: 'warn', msg: `No sample name for ${list(noSample)}. Assign it in the plate map.` })
   if (stdNoQty.length) issues.push({ line: at, level: 'warn', msg: `No quantity for ${list(stdNoQty)} marked as standards, so they cannot be used in a standard curve. Enter quantities in the plate map.` })
