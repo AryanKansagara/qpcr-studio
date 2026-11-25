@@ -30,7 +30,7 @@ test('#10 Mann-Whitney ties survive floating-point noise', () => {
   expect(mannWhitney([28.1 - 18, 12, 13], [28.2 - 18.1, 8, 9]).exact).toBe(false)
 })
 
-test.fail('#11 small p-values and folds keep significant digits', () => {
+test('#11 small p-values and folds keep significant digits', () => {
   const c = { target: 'T', group: 'X', vs: 'C', na: 3, nb: 3, log2fc: -13, lo: -14, hi: -12, fold: 2 ** -13, foldLo: 2 ** -14, foldHi: 2 ** -12, p: 2e-6, stars: '****', test: 'w' }
   const a = { targets: [{ target: 'T', samples: [], groups: [], omnibus: null, comparisons: [c] }] } as unknown as Parameters<typeof resultsCsv>[0]
   const cells = resultsCsv(a).split('\n')[1].split(',').map(Number)

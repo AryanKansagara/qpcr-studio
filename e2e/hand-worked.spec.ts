@@ -15,8 +15,8 @@ test('Livak fold change, Welch CI and p; then Pfaffl; then Mann-Whitney', async 
   await page.getByText('Per-sample values').click()
   await expect.poll(async () => (await table(card(page, 'Statistics').locator('table').nth(1))).map(r => r[2])).toEqual(['10.00', '11.00', '12.00', '8.00', '9.00', '10.00'])
   const [, csv] = await download(page, page.getByRole('button', { name: 'Results CSV' }))
-  // ln2 fold 2, CI 2 +- 2.2669; p 0.0705.
-  expect(csvRows(csv)[1]).toEqual(['T', 'Trt', 'Ctrl', '3', '3', '2', '4', '0.8311', '19.2523', '0.0705', 'ns', '"Welch t-test', ' df 4.0"', 'Welch t', '0.0705'])
+  // ln2 fold 2, CI 2 +- 2.2669; p = 1 - 0.774597 * 1.2 = 0.070484 to five significant digits.
+  expect(csvRows(csv)[1]).toEqual(['T', 'Trt', 'Ctrl', '3', '3', '2', '4', '0.83107', '19.2523', '0.070484', 'ns', '"Welch t-test', ' df 4.0"', 'Welch t', '0.070484'])
 
   // Pfaffl: 1.9^3 / 2 = 3.4295 -> 3.43.
   await openTab(page, 'Setup')

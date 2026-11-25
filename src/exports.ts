@@ -2,22 +2,28 @@ import type { Analysis } from './engine/qpcr.ts'
 import { toCsv } from './engine/parse.ts'
 import type { Project } from './store.ts'
 
-const r4 = (x: number | null | undefined) => (x === null || x === undefined || !isFinite(x) ? '' : +x.toFixed(4))
+const none = (x: number | null | undefined): x is null | undefined => x === null || x === undefined || !isFinite(x)
+/** Four decimals from 1 up, five significant digits below it, so small values keep their digits. */
+const num = (x: number | null | undefined) => (none(x) ? '' : +(Math.abs(x) >= 1 ? x.toFixed(4) : x.toPrecision(5)))
+/** For Cq and log2 values, where 1e-9 is rounding noise around 0. */
+const cyc = (x: number | null | undefined) => num(!none(x) && Math.abs(x) < 1e-9 ? 0 : x)
+/** Never 0. Below one in a million the numerical integration behind Dunnett and Tukey has no digits left. */
+const pval = (p: number | null | undefined) => (none(p) ? '' : p < 1e-6 ? '<0.000001' : num(p))
 
 export function comparisonRows(a: Analysis): unknown[][] {
   const out: unknown[][] = [['Target', 'Group', 'Versus', 'n group', 'n control', 'log2 fold change', 'Fold change', 'CI low', 'CI high', 'p', 'Significance', 'Test', 'Omnibus test', 'Omnibus p']]
-  for (const t of a.targets) for (const c of t.comparisons) out.push([c.target, c.group, c.vs, c.na, c.nb, r4(c.log2fc), r4(c.fold), r4(c.foldLo), r4(c.foldHi), r4(c.p), c.stars, c.test, t.omnibus?.test ?? '', r4(t.omnibus?.p)])
+  for (const t of a.targets) for (const c of t.comparisons) out.push([c.target, c.group, c.vs, c.na, c.nb, cyc(c.log2fc), num(c.fold), num(c.foldLo), num(c.foldHi), pval(c.p), c.stars, c.test, t.omnibus?.test ?? '', pval(t.omnibus?.p)])
   return out
 }
 export function sampleRows(a: Analysis, p: Project): unknown[][] {
   const out: unknown[][] = [['Sample', 'Group', 'Target', p.settings.method === 'livak' ? 'ΔCq (target - mean reference)' : 'Efficiency-corrected ΔCq (log2 units)', 'log2 relative to control', 'Relative expression']]
-  for (const t of a.targets) for (const s of t.samples) out.push([s.sample, s.group, t.target, r4(s.dcq), r4(s.log2rel), r4(2 ** s.log2rel)])
+  for (const t of a.targets) for (const s of t.samples) out.push([s.sample, s.group, t.target, cyc(s.dcq), cyc(s.log2rel), num(2 ** s.log2rel)])
   return out
 }
 export function replicateRows(a: Analysis, p: Project): unknown[][] {
   const name = (id: string) => p.plates.find(x => x.id === id)?.name ?? id
   const out: unknown[][] = [['Plate', 'Well', 'Sample', 'Group', 'Target', 'Cq', 'Tm', 'Excluded', 'Auto-flagged', 'Replicate mean', 'Replicate SD', 'Flag']]
-  for (const r of a.replicates) for (const w of r.wells) out.push([name(r.plateId), w.well, r.sample, r.group, r.target, r4(w.cq), r4(w.tm), w.excluded ? 'yes' : '', w.auto ? 'yes' : '', r4(r.mean), r4(r.sd), r.flag])
+  for (const r of a.replicates) for (const w of r.wells) out.push([name(r.plateId), w.well, r.sample, r.group, r.target, cyc(w.cq), cyc(w.tm), w.excluded ? 'yes' : '', w.auto ? 'yes' : '', cyc(r.mean), cyc(r.sd), r.flag])
   return out
 }
 export function qcRows(a: Analysis): unknown[][] {
@@ -42,7 +48,7 @@ export async function resultsXlsx(a: Analysis, p: Project): Promise<Blob> {
   if (a.stability) {
     const st = a.stability
     add('Reference stability', [['Gene', 'geNorm M', 'geNorm rank', 'NormFinder stability', 'BestKeeper ±Cq', 'BestKeeper CV %', 'r vs BestKeeper index', 'Treatment shift (Cq)', 'Shift p'],
-      ...st.genes.map(g => [g, r4(st.genorm.m[g]), st.genorm.ranking.indexOf(g) + 1, r4(st.normfinder?.stability[g]), r4(st.bestkeeper[g].sd), r4(st.bestkeeper[g].cv), r4(st.bestkeeper[g].r), r4(st.shift[g]?.diff), r4(st.shift[g]?.p)])])
+      ...st.genes.map(g => [g, cyc(st.genorm.m[g]), st.genorm.ranking.indexOf(g) + 1, cyc(st.normfinder?.stability[g]), cyc(st.bestkeeper[g].sd), cyc(st.bestkeeper[g].cv), cyc(st.bestkeeper[g].r), cyc(st.shift[g]?.diff), pval(st.shift[g]?.p)])])
   }
   const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
   return new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
