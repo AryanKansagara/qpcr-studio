@@ -1,10 +1,12 @@
-import { groupOf, type Analysis, type Meta, type Settings } from './engine/qpcr.ts'
+import { useState } from 'react'
+import { EFF_MAX, EFF_MIN, groupOf, validEfficiency, type Analysis, type Meta, type Settings } from './engine/qpcr.ts'
 import { setSettings } from './Project.tsx'
 import { saveProject, type Project, type Registry } from './store.ts'
 import { STATUS_LABEL } from './Workspace.tsx'
 
 export default function Setup({ p, a }: { p: Project; a: Analysis }) {
   const s = p.settings
+  const [effError, setEffError] = useState<Record<string, string>>({})
   const set = (patch: Partial<Settings>) => void setSettings(p, patch)
   const setMeta = (patch: Partial<Meta>) => void saveProject({ ...p, meta: { ...p.meta, ...patch } })
   const setReg = (patch: Partial<Registry>) => void saveProject({ ...p, registry: { ...p.registry, ...patch } })
@@ -13,6 +15,16 @@ export default function Setup({ p, a }: { p: Project; a: Analysis }) {
   const samples = [...new Set(allWells.filter(w => w.role === 'unknown' || w.role === 'calibrator').map(w => w.sample).filter(Boolean))]
   const groups = a.groups
   const num = (v: string, d: number) => (isFinite(+v) && v !== '' ? +v : d)
+
+  const setEfficiency = (t: string, el: HTMLInputElement) => {
+    const v = el.value
+    const bad = el.validity.badInput || (v !== '' && !validEfficiency(+v))
+    setEffError(e => ({ ...e, [t]: bad ? `${v || 'That'} was not saved: enter a percentage from ${EFF_MIN} to ${EFF_MAX} (an amplification factor of 1.95 is 95).` : '' }))
+    if (bad) { el.value = String(s.efficiencies[t] ?? ''); return }
+    const eff = { ...s.efficiencies }
+    if (v === '') delete eff[t]; else eff[t] = +v
+    set({ efficiencies: eff })
+  }
 
   return (
     <div className="stack-lg setup">
@@ -28,7 +40,7 @@ export default function Setup({ p, a }: { p: Project; a: Analysis }) {
         <p className="muted small">Leave blank to use the standard curve on these plates, or 100% if there is none. Values are in percent.</p>
         <div className="table-wrap"><table className="vt compact"><thead><tr><th>Target</th><th>Entered (%)</th><th>In use</th><th>Source</th></tr></thead>
           <tbody>{targets.map(t => <tr key={t}><th scope="row"><i>{t}</i></th>
-            <td><input type="number" className="short" min={50} max={150} step={0.1} aria-label={`${t} efficiency percent`} defaultValue={s.efficiencies[t] ?? ''} onBlur={e => { const v = e.target.value; const eff = { ...s.efficiencies }; if (v === '') delete eff[t]; else eff[t] = +v; set({ efficiencies: eff }) }} /></td>
+            <td><input type="number" className="short" min={EFF_MIN} max={EFF_MAX} step={0.1} aria-label={`${t} efficiency percent`} defaultValue={s.efficiencies[t] ?? ''} onBlur={e => setEfficiency(t, e.target)} />{effError[t] && <p className="error small" role="alert">{effError[t]}</p>}</td>
             <td className="num">{a.efficiencies[t] ? `${(a.efficiencies[t].e * 100).toFixed(1)}%` : '–'}</td><td className="small muted">{a.efficiencies[t]?.source === 'manual' ? 'entered' : a.efficiencies[t]?.source === 'curve' ? 'standard curve' : 'assumed 100%'}</td></tr>)}</tbody></table></div>
       </div>
 

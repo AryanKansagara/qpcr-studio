@@ -59,7 +59,7 @@ test('#15 zero variance gives no p-value', () => {
   expect(a.targets[0].comparisons[0].p).toBeNull()
 })
 
-test.fail('#16 an efficiency of 1.95 percent is refused', async ({ page }) => {
+test('#16 an efficiency of 1.95 percent is refused', async ({ page }) => {
   await analyse(page, HAND)
   await openTab(page, 'Setup')
   await fillAndLeave(page.getByLabel('T efficiency percent'), '1.95')
