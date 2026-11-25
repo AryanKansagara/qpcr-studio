@@ -85,9 +85,13 @@ export const wellFromIndex = (i: number, f: 96 | 384) => { const { cols } = plat
 export const formatFor = (wells: string[]): 96 | 384 => wells.some(w => { const p = parseWell(w); return !!p && (p.row > 7 || p.col > 11) }) ? 384 : 96
 export const wellKey = (plateId: string, well: string) => `${plateId}|${well}`
 
-/** "Treated-2", "Treated_2", "Treated 2", "Treated rep2" -> "Treated". */
+/** "Treated-2", "Treated_2", "Treated 2", "Treated rep2" -> "Treated"; "LPS_6h" stays as it is. */
 export function guessGroup(sample: string) {
-  const g = sample.replace(/[\s_\-.]*(rep|r|bio|br|n|#)?[\s_\-.]*\d+[a-z]?$/i, '').trim()
+  // "Ctrl 0.5" ends in a dose.
+  if (/(^|\D)0\.\d+$/.test(sample)) return sample
+  // A number may carry a replicate letter (1a). Other letters are units (6h, 2d, 5g, 37C) and tell conditions apart.
+  // A word before the number is a replicate marker only when it stands alone, or after capitals (WTr1), so Tumor1 keeps its r.
+  const g = sample.replace(/((^|[\s_\-.]+)([Rr][Ee][Pp]|[Bb][Ii][Oo]|[Bb]?[Rr]|[Nn])|[Rr][Ee][Pp]|(?<=[A-Z])(b?r|n)|[\s_\-.]*#)?[\s_\-.]*\d+[abcefABEF]?$/, '').trim()
   return g || sample
 }
 
@@ -287,9 +291,11 @@ function contaminationChecks(plates: Plate[], s: Settings, reps: Replicate[], ad
     if (w.role !== 'ntc' && w.role !== 'nrt') continue
     const cq = adj(p.id, w)
     const tReps = reps.filter(r => r.target === w.target && r.mean !== null)
-    const productTm = median(tReps.flatMap(r => r.wells.filter(x => !x.excluded && x.tm != null).map(x => x.tm!)))
+    // A dilution-series plate has no samples: its NTC is judged against the standards.
+    const stds = tReps.length ? [] : plates.flatMap(q => q.wells.filter(x => x.role === 'standard' && x.target === w.target && x.cq !== null && !s.excluded[wellKey(q.id, x.well)]).map(x => ({ cq: adj(q.id, x)!, tm: x.tm })))
+    const productTm = median(tReps.length ? tReps.flatMap(r => r.wells.filter(x => !x.excluded && x.tm != null).map(x => x.tm!)) : stds.filter(x => x.tm != null).map(x => x.tm!))
     let ref: number | null = null
-    if (w.role === 'ntc') ref = tReps.length ? Math.max(...tReps.map(r => r.mean!)) : null
+    if (w.role === 'ntc') ref = tReps.length ? Math.max(...tReps.map(r => r.mean!)) : stds.length ? Math.max(...stds.map(x => x.cq)) : null
     else {
       const same = tReps.filter(r => r.sample === w.sample)
       ref = same.length ? mean(same.map(r => r.mean!)) : tReps.length ? mean(tReps.map(r => r.mean!)) : null
@@ -297,15 +303,16 @@ function contaminationChecks(plates: Plate[], s: Settings, reps: Replicate[], ad
     const base = { plateId: p.id, well: w.well, role: w.role, target: w.target, sample: w.sample, cq, tm: w.tm ?? null, ref }
     if (cq === null) { out.push({ ...base, gap: null, status: 'pass', note: 'No amplification.' }); continue }
     const gap = ref === null ? null : cq - ref
+    if (gap === null) { out.push({ ...base, gap, status: 'warn', note: `Amplified at Cq ${cq.toFixed(1)}, but there is no ${w.role === 'ntc' ? 'sample or standard' : 'RT+ sample'} with a Cq for this assay to compare it with: contamination cannot be ruled out.` }); continue }
     const dimer = w.tm != null && !isNaN(productTm) && Math.abs(w.tm - productTm) > 2
-    const label = w.role === 'ntc' ? `latest sample (${ref?.toFixed(2)})` : `the matching RT+ sample (${ref?.toFixed(2)})`
-    if (gap !== null && gap < s.ntcWindow) {
+    const label = w.role === 'ntc' ? `latest ${tReps.length ? 'sample' : 'standard'} (${ref?.toFixed(2)})` : `the matching RT+ sample (${ref?.toFixed(2)})`
+    if (gap < s.ntcWindow) {
       out.push({ ...base, gap, status: dimer ? 'warn' : 'fail', note: dimer
         ? `Amplified ${gap.toFixed(1)} cycles after ${label}, but Tm ${w.tm!.toFixed(1)} °C differs from the product (${productTm.toFixed(1)} °C): likely primer-dimer.`
-        : w.role === 'ntc' ? `Amplified only ${gap.toFixed(1)} cycles after ${label}${w.tm != null && !isNaN(productTm) ? ` with the product Tm (${w.tm.toFixed(1)} °C)` : ''}: template contamination.`
+        : w.role === 'ntc' ? `Amplified ${gap < 0 ? `${(-gap).toFixed(1)} cycles before` : `only ${gap.toFixed(1)} cycles after`} ${label}${w.tm != null && !isNaN(productTm) ? ` with the product Tm (${w.tm.toFixed(1)} °C)` : ''}: template contamination.`
           : `Only ${gap.toFixed(1)} cycles after ${label}: genomic DNA contributes about ${(100 / 2 ** gap).toFixed(1)}% of signal.` })
     } else {
-      out.push({ ...base, gap, status: 'warn', note: `Late signal at Cq ${cq.toFixed(1)}${gap !== null ? `, ${gap.toFixed(1)} cycles after ${label}` : ''}${dimer ? ', melt suggests primer-dimer' : ''}. Below the ${s.ntcWindow}-cycle threshold for concern, but worth noting.` })
+      out.push({ ...base, gap, status: 'warn', note: `Late signal at Cq ${cq.toFixed(1)}, ${gap.toFixed(1)} cycles after ${label}${dimer ? ', melt suggests primer-dimer' : ''}. Below the ${s.ntcWindow}-cycle threshold for concern, but worth noting.` })
     }
   }
   return out
@@ -361,7 +368,8 @@ export function refStability(genes: string[], samples: string[], groupOf: Map<st
   const stable = ranking.filter(g => mAtExit[g] < 0.5)
   const recommended = ranking.slice(0, Math.max(2, Math.min(optimal, stable.length || 2)))
 
-  // NormFinder-style: intragroup variance and shrunk intergroup variation, combined into a stability value.
+  // NormFinder (Andersen 2004): intragroup variance and shrunk intergroup difference, combined as mean over groups of |d| + sqrt(var).
+  // Checked against stabMeasureRho of Bioconductor NormqPCR.
   let normfinder: Stability['normfinder'] = null
   const grp = [...new Set(usable.map(x => groupOf.get(x)!))]
   const byG = grp.map(g => usable.filter(x => groupOf.get(x) === g)).filter(xs => xs.length >= 2)
@@ -369,8 +377,8 @@ export function refStability(genes: string[], samples: string[], groupOf: Map<st
   if (k >= 3 && byG.length >= 1) {
     const sig: number[][] = genes.map(() => [])
     const dvals: number[][] = genes.map(() => [])
-    const all = byG.flat()
-    const gene = genes.map(g => mean(all.map(x => val(x, g))))
+    // Each gene is centred on the mean of its group means, so larger groups do not weigh more.
+    const gene = genes.map(g => mean(byG.map(xs => mean(xs.map(x => val(x, g))))))
     const tot = mean(gene)
     byG.forEach((xs, gi) => {
       const ig = genes.map(g => mean(xs.map(x => val(x, g))))
@@ -379,7 +387,7 @@ export function refStability(genes: string[], samples: string[], groupOf: Map<st
       const raw = genes.map((g, i) => xs.reduce((acc, x, j) => acc + (val(x, g) - ig[i] - sj[j] + gg) ** 2, 0) / (xs.length - 1))
       const rs = raw.reduce((a, b) => a + b, 0)
       genes.forEach((_, i) => {
-        sig[i][gi] = Math.max(1e-6, (raw[i] - rs / (k * (k - 1))) / (1 - 2 / k))
+        sig[i][gi] = Math.max(0, (raw[i] - rs / (k * (k - 1))) / (1 - 2 / k))
         dvals[i][gi] = ig[i] - gene[i] - gg + tot
       })
     })
@@ -394,7 +402,7 @@ export function refStability(genes: string[], samples: string[], groupOf: Map<st
           const sn = sig[i][gi] / xs.length
           const shrink = gamma2 + sn > 0 ? gamma2 / (gamma2 + sn) : 0
           const dt = shrink * dvals[i][gi]
-          return Math.sqrt(dt * dt + (gamma2 * sn) / (gamma2 + sn || 1) + sn)
+          return Math.abs(dt) + Math.sqrt(sn + (gamma2 * sn) / (gamma2 + sn || 1))
         })
         stability[g] = mean(per)
       })
@@ -517,6 +525,7 @@ export function miqe(plates: Plate[], s: Settings, meta: Meta, a: Analysis): Miq
   const noEff = targets.filter(t => a.efficiencies[t]?.source === 'assumed')
   const noPrimer = targets.filter(t => !meta.primers[t]?.fwd || !meta.primers[t]?.rev)
   const noAmp = targets.filter(t => !meta.primers[t]?.amplicon)
+  const uncompared = a.contamination.filter(c => c.cq !== null && c.gap === null).length
   const hasTm = all.some(w => w.tm != null)
   const items: MiqeItem[] = [
     it('design', 'Experimental design', 'Groups and biological replicates', a.groups.length >= 2 && minN >= 3, a.groups.length ? `${a.groups.length} groups, smallest has ${isFinite(minN) ? minN : 0} biological replicates${minN < 3 ? ' (3 or more recommended)' : ''}.` : 'No groups defined.'),
@@ -526,7 +535,7 @@ export function miqe(plates: Plate[], s: Settings, meta: Meta, a: Analysis): Miq
     it('amplicon', 'qPCR target', 'Amplicon length', noAmp.length === 0, noAmp.length ? `Missing for ${noAmp.join(', ')}.` : 'Reported for all targets.', noAmp.length === targets.length),
     it('eff', 'qPCR validation', 'PCR efficiency per assay', noEff.length === 0, noEff.length ? `No standard curve or entered efficiency for ${noEff.join(', ')} (100% assumed).` : targets.map(t => `${t} ${(a.efficiencies[t].e * 100).toFixed(1)}%`).join(', ') + '.'),
     it('r2', 'qPCR validation', 'Standard curve R² and dynamic range', a.curves.every(c => c.r2 >= 0.98 && c.decades >= 3), a.curves.length ? a.curves.map(c => `${c.target} R² ${c.r2.toFixed(3)}, ${c.decades.toFixed(1)} decades`).join('; ') + '.' : 'No standard curve in this project (efficiencies entered or assumed).', !a.curves.length && noEff.length > 0),
-    it('ntc', 'qPCR validation', 'NTC for every assay, clean', noNtc.length === 0 && a.counts.contamFail === 0, noNtc.length ? `No NTC for ${noNtc.join(', ')}.` : a.counts.contamFail ? `${a.counts.contamFail} NTC/NRT well(s) failed contamination checks.` : 'All NTCs present and clean.'),
+    it('ntc', 'qPCR validation', 'NTC for every assay, clean', noNtc.length === 0 && a.counts.contamFail === 0 && !uncompared, noNtc.length ? `No NTC for ${noNtc.join(', ')}.` : a.counts.contamFail ? `${a.counts.contamFail} NTC/NRT well(s) failed contamination checks.` : uncompared ? `${uncompared} amplified control well(s) had nothing to be compared with.` : 'All NTCs present and clean.'),
     it('nrt', 'qPCR validation', 'No-RT control for gDNA', all.some(w => w.role === 'nrt') && !a.contamination.some(c => c.role === 'nrt' && c.status === 'fail'), all.some(w => w.role === 'nrt') ? 'Included.' : 'No NRT wells (needed unless primers span an exon-exon junction).'),
     it('spec', 'qPCR validation', 'Specificity (melt curve or probe)', meta.chemistry === 'probe' || (hasTm && a.melt.length === 0), meta.chemistry === 'probe' ? 'Hydrolysis probe chemistry.' : hasTm ? a.melt.length ? `${a.melt.length} well(s) with Tm outside ±${s.tmTolerance} °C.` : 'Single, consistent Tm per assay.' : 'No melt data imported.', !hasTm && meta.chemistry !== 'probe'),
     it('instr', 'qPCR protocol', 'Instrument and chemistry', !!meta.instrument && !!meta.chemistry, [meta.instrument || 'instrument not set', meta.chemistry || 'chemistry not set'].join(', ') + '.', !meta.instrument && !meta.chemistry),
