@@ -119,7 +119,9 @@ export interface Stability {
 }
 export interface SampleExpr { sample: string; group: string; dcq: number; log2rel: number }
 export interface Comparison { target: string; group: string; vs: string; na: number; nb: number; log2fc: number; lo: number; hi: number; fold: number; foldLo: number; foldHi: number; p: number | null; stars: string; test: string }
-export interface TargetResult { target: string; samples: SampleExpr[]; groups: { group: string; n: number; meanLog2: number; sdLog2: number }[]; omnibus: { test: string; stat: number; p: number } | null; comparisons: Comparison[]; note?: string }
+/** A sample with wells on the plates that has no value for this target, and why. */
+export interface LeftOut { sample: string; group: string; why: string }
+export interface TargetResult { target: string; samples: SampleExpr[]; leftOut: LeftOut[]; groups: { group: string; n: number; meanLog2: number; sdLog2: number }[]; omnibus: { test: string; stat: number; p: number } | null; comparisons: Comparison[]; note?: string }
 export interface Calib { target: string; plateId: string; offset: number }
 
 export interface Analysis {
@@ -225,6 +227,17 @@ export function analyze(plates: Plate[], s: Settings): Analysis {
   else if (refs.length === 1) warnings.push('Normalising to a single reference gene. MIQE recommends at least two validated reference genes.')
   const goi = targetsAll.filter(t => !refs.includes(t) && allWells.some(w => w.target === t && w.role === 'unknown'))
   const targets: TargetResult[] = refs.length ? goi.map(t => expression(t, refs, samples, sampleGroup, groups, control, L, s)) : []
+  const planned = [...new Set(allWells.filter(w => w.role === 'unknown' && w.sample && w.sample !== s.calibrator).map(w => w.sample))]
+  // Why a sample has no Cq for a gene, or null when it has one.
+  const lacking = (x: string, g: string) => {
+    if (cqMap.has(`${x}|${g}`)) return null
+    const reps = replicates.filter(r => r.sample === x && r.target === g)
+    return !reps.length ? `no ${g} well` : reps.some(r => r.wells.some(w => w.cq !== null)) ? `every ${g} well with a Cq is excluded` : `${g} undetermined`
+  }
+  for (const t of targets) {
+    t.leftOut = planned.filter(x => !t.samples.some(y => y.sample === x)).map(x => ({ sample: x, group: groupOf(x, s, allWells), why: [t.target, ...refs].map(g => lacking(x, g)).filter(Boolean).join(', ') }))
+    if (t.leftOut.length) warnings.push(leftOutText(t))
+  }
 
   const excluded = replicates.flatMap(r => r.wells).filter(w => w.excluded).length
   return {
@@ -439,6 +452,14 @@ export function refStability(genes: string[], samples: string[], groupOf: Map<st
   return { genes, samples: usable.length, genorm: { steps, ranking, m: steps[0]?.m ?? {}, v, optimal, recommended }, normfinder, bestkeeper, shift }
 }
 
+/** "T: left out of the fold change: X-3 (T undetermined). ..." */
+export function leftOutText(t: TargetResult) {
+  const few = [...new Set(t.leftOut.map(x => x.group))].map(g => ({ g, n: t.samples.filter(x => x.group === g).length })).filter(x => x.n < 2)
+  return `${t.target}: left out of the fold change: ${t.leftOut.map(x => `${x.sample} (${x.why})`).join('; ')}.`
+    + (t.leftOut.some(x => x.why.includes(' undetermined')) ? ' Leaving out samples without amplification biases the fold change.' : '')
+    + (few.length ? ` Not compared, with fewer than two samples left: ${few.map(x => `${x.g} (${x.n})`).join(', ')}.` : '')
+}
+
 function expression(t: string, refs: string[], samples: string[], gOf: Map<string, string>, groups: string[], control: string, L: (s: string, g: string) => number | null, s: Settings): TargetResult {
   const rows: SampleExpr[] = []
   for (const x of samples) {
@@ -453,7 +474,7 @@ function expression(t: string, refs: string[], samples: string[], gOf: Map<strin
   rows.forEach(r => (r.log2rel -= base))
   const by = (g: string) => rows.filter(r => r.group === g).map(r => r.log2rel)
   const gstats = groups.map(g => ({ group: g, n: by(g).length, meanLog2: mean(by(g)), sdLog2: by(g).length > 1 ? sd(by(g)) : NaN })).filter(g => g.n > 0)
-  const res: TargetResult = { target: t, samples: rows, groups: gstats, omnibus: null, comparisons: [] }
+  const res: TargetResult = { target: t, samples: rows, leftOut: [], groups: gstats, omnibus: null, comparisons: [] }
   if (!ctrl.length) { res.note = `No samples in the control group (${control}) for ${t}.`; return res }
   const live = gstats.filter(g => g.n >= 2)
   const mk = (g: string, vs: string, na: number, nb: number, d: number, lo: number, hi: number, p: number | null, test: string): Comparison =>
