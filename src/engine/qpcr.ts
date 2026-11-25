@@ -179,7 +179,11 @@ export function analyze(plates: Plate[], s: Settings): Analysis {
   if (s.calibrator && plates.length > 1) {
     const targets = [...new Set(allWells.filter(w => w.sample === s.calibrator && w.cq !== null).map(w => w.target))]
     for (const t of targets) {
-      const per = plates.map(p => ({ p, m: mean(p.wells.filter(w => w.sample === s.calibrator && w.target === t && w.cq !== null && !exclusionOf(s, p.id, w.well, w.target)).map(w => w.cq!)) }))
+      // The same replicate rule as QC, so a well excluded there does not shift the plate.
+      const per = plates.map(p => {
+        const ws = p.wells.filter(w => w.sample === s.calibrator && w.target === t)
+        return { p, m: (ws.length ? aggregate(p.id, ws, s, allWells, (_, w) => w.cq).mean : null) ?? NaN }
+      })
       if (per.some(x => isNaN(x.m))) { warnings.push(`Calibrator ${s.calibrator} is missing for ${t} on some plates, so ${t} is not calibrated across plates.`); continue }
       const grand = mean(per.map(x => x.m))
       for (const x of per) { offset.set(`${x.p.id}|${t}`, x.m - grand); calibration.push({ target: t, plateId: x.p.id, offset: x.m - grand }) }

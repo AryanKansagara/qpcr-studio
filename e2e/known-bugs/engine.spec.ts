@@ -42,7 +42,7 @@ test.fail('#12 a formula in a name is neutralised in CSV', () => {
   expect(csvCell('=1+1')).not.toMatch(/^=/)
 })
 
-test.fail('#13 calibrator wells excluded as outliers do not shift plates', () => {
+test('#13 calibrator wells excluded as outliers do not shift plates', () => {
   const p = (id: string, third: number) => plate(id, [well('A1', 'IRC', 'T', 20), well('A2', 'IRC', 'T', 20.1), well('A3', 'IRC', 'T', third)])
   // Plate 1 keeps 20, 20.1 (mean 20.05); plate 2 has 20, 20.1, 20.05 (mean 20.05).
   const a = analyze([p('1', 23), p('2', 20.05)], S({ calibrator: 'IRC' }))
