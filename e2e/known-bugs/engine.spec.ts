@@ -73,7 +73,7 @@ test.fail('#17 omitting one target of a duplex well keeps the other', async ({ p
   await expect(page.locator('.tile').filter({ hasText: 'Wells excluded' }).locator('b')).toHaveText('1', { timeout: 10_000 })
 })
 
-test.fail('#18 a blank line does not cut off a short table', () => {
+test('#18 a blank line does not cut off a short table', () => {
   const rows = parseDelimited('well,cq\nA1,20\nA2,21\n\nA3,22\nA4,23\n')
   const d = detect(rows)!
   expect(parseRows(rows, d.headerIndex, d.mapping).wells).toHaveLength(4)
