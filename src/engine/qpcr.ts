@@ -161,6 +161,10 @@ export interface Analysis {
 
 // ---------- Analysis ----------
 
+/** Plausible PCR efficiencies in percent. 1.95 is an amplification factor (95%), not 1.95%. */
+export const EFF_MIN = 50, EFF_MAX = 150
+export const validEfficiency = (pct: number) => pct >= EFF_MIN && pct <= EFF_MAX
+
 const log2E = (e: number) => Math.log2(1 + e)
 
 export function groupOf(sample: string, s: Settings, wells: Well[]) {
@@ -218,7 +222,9 @@ export function analyze(plates: Plate[], s: Settings): Analysis {
   for (const t of targetsAll) {
     const man = s.efficiencies[t]
     const c = curves.find(x => x.target === t)
-    efficiencies[t] = man > 0 ? { target: t, e: man / 100, source: 'manual' } : c && c.efficiency > 0 && c.efficiency < 1.5 ? { target: t, e: c.efficiency, source: 'curve' } : { target: t, e: 1, source: 'assumed' }
+    const manual = man != null && validEfficiency(man)
+    if (man != null && !manual) warnings.push(`The efficiency entered for ${t} (${man}%) is outside ${EFF_MIN} to ${EFF_MAX}% and is not used. Correct it in Setup.`)
+    efficiencies[t] = manual ? { target: t, e: man / 100, source: 'manual' } : c && c.efficiency > 0 && c.efficiency < 1.5 ? { target: t, e: c.efficiency, source: 'curve' } : { target: t, e: 1, source: 'assumed' }
   }
   const eOf = (t: string) => (s.method === 'livak' ? 1 : efficiencies[t]?.e ?? 1)
 

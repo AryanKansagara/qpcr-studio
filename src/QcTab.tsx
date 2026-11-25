@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { isExcluded, miqe, withExclusion, type Analysis, type Curve, type Replicate } from './engine/qpcr.ts'
+import { EFF_MAX, EFF_MIN, isExcluded, miqe, validEfficiency, withExclusion, type Analysis, type Curve, type Replicate } from './engine/qpcr.ts'
 import { setSettings, useFigColours } from './Project.tsx'
 import { getProjects, saveProject, type Project } from './store.ts'
 import { fmtCq, fmtP, Link, toast } from './ui.tsx'
@@ -103,9 +103,12 @@ function Curves({ p, a }: { p: Project; a: Analysis }) {
   const copy = async () => {
     const d = getProjects().find(x => x.id === dest)
     if (!d) return
-    const eff = { ...d.settings.efficiencies, ...Object.fromEntries(a.curves.map(c => [c.target, +(c.efficiency * 100).toFixed(1)])) }
+    const ok = a.curves.filter(c => validEfficiency(+(c.efficiency * 100).toFixed(1)))
+    const not = a.curves.filter(c => !ok.includes(c)).map(c => c.target)
+    if (!ok.length) { toast(`Nothing copied: every efficiency is outside ${EFF_MIN} to ${EFF_MAX}%.`, { tone: 'error' }); return }
+    const eff = { ...d.settings.efficiencies, ...Object.fromEntries(ok.map(c => [c.target, +(c.efficiency * 100).toFixed(1)])) }
     await saveProject({ ...d, settings: { ...d.settings, efficiencies: eff } })
-    toast(`Efficiencies copied to ${d.name}.`, { tone: 'ok' })
+    toast(`Efficiencies copied to ${d.name}.${not.length ? ` Not copied (outside ${EFF_MIN} to ${EFF_MAX}%): ${not.join(', ')}.` : ''}`, { tone: 'ok' })
   }
   return (
     <div className="card pad">
@@ -113,7 +116,7 @@ function Curves({ p, a }: { p: Project; a: Analysis }) {
         <div><h2 className="h4">Standard curves</h2><p className="muted small">Cq against log10 quantity. E = 10^(-1/slope) - 1; acceptable 90 to 110% with R² ≥ 0.98 over at least 3 decades.</p></div>
         {others.length > 0 && <div className="row gap-sm"><label className="field inline"><span>Use in</span><select value={dest} onChange={e => setDest(e.target.value)}><option value="">Choose experiment</option>{others.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label><button type="button" className="btn ghost sm" disabled={!dest} onClick={() => void copy()}>Copy efficiencies</button></div>}
       </div>
-      <div className="curve-grid">{a.curves.map(c => <CurveCard key={c.target} c={c} manual={p.settings.efficiencies[c.target]} />)}</div>
+      <div className="curve-grid">{a.curves.map(c => <CurveCard key={c.target} c={c} manual={a.efficiencies[c.target]?.source === 'manual' ? p.settings.efficiencies[c.target] : undefined} />)}</div>
     </div>
   )
 }
