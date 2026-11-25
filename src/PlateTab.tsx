@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { parseLayout } from './engine/parse.ts'
-import { groupOf, plateDims, ROLE_LABEL, ROLES, wellKey, wellName, type Analysis, type Plate, type Role, type Well } from './engine/qpcr.ts'
+import { groupOf, moveExclusions, plateDims, ROLE_LABEL, ROLES, wellKey, wellName, withExclusion, type Analysis, type Plate, type Role, type Well } from './engine/qpcr.ts'
 import { ImportWizard } from './Import.tsx'
 import { CatLegend, CqLegend, PlateMap, roleLegend, type ColorBy } from './PlateMap.tsx'
 import { OKABE_ITO } from './figure.ts'
@@ -33,11 +33,12 @@ export default function PlateTab({ p, a }: { p: Project; a: Analysis }) {
 
   const allWells = p.plates.flatMap(x => x.wells)
   const gOf = (s: string) => groupOf(s, p.settings, allWells)
-  const flagged = useMemo(() => new Set(a.replicates.filter(r => r.plateId === plate?.id).flatMap(r => r.wells.filter(w => w.auto).map(w => w.well))), [a, plate])
+  const flagged = useMemo(() => new Set(a.replicates.filter(r => r.plateId === plate?.id).flatMap(r => r.wells.filter(w => w.auto).map(w => wellKey(r.plateId, w.well, r.target)))), [a, plate])
 
   const updatePlate = (next: Plate, msg: string) => {
     const prev = p.plates
-    void saveProject({ ...p, plates: p.plates.map(x => (x.id === next.id ? next : x)) })
+    const excluded = moveExclusions(p.settings.excluded, next.id, plate.wells, next.wells)
+    void saveProject({ ...p, settings: { ...p.settings, excluded }, plates: p.plates.map(x => (x.id === next.id ? next : x)) })
     toast(msg, { undo: () => void saveProject({ ...p, plates: prev }) })
   }
 
@@ -74,14 +75,20 @@ export default function PlateTab({ p, a }: { p: Project; a: Analysis }) {
     if (patch.group !== undefined) {
       const samples = new Set(wells.filter(w => sel.has(w.well)).map(w => w.sample))
       const groups = Object.fromEntries(Object.entries(p.settings.groups).filter(([k]) => !samples.has(k)))
-      void setSettings({ ...p, plates: p.plates.map(x => (x.id === plate.id ? { ...plate, wells } : x)) }, { groups })
+      void setSettings({ ...p, plates: p.plates.map(x => (x.id === plate.id ? { ...plate, wells } : x)) }, { groups, excluded: moveExclusions(p.settings.excluded, plate.id, plate.wells, wells) })
       return
     }
     updatePlate({ ...plate, wells }, `Updated ${sel.size} well${sel.size === 1 ? '' : 's'}.`)
   }
   const exclude = (on: boolean) => {
-    const next = { ...p.settings.excluded }
-    for (const w of sel) { const k = wellKey(plate.id, w); if (on) next[k] = true; else if (flagged.has(w)) next[k] = false; else delete next[k] }
+    let next = { ...p.settings.excluded }
+    for (const w of sel) {
+      // The choice covers the whole well: every reaction in it, and the place itself when it is empty.
+      const k = wellKey(plate.id, w), here = plate.wells.filter(x => x.well === w)
+      delete next[k]
+      if (!here.length && on) next[k] = true
+      for (const x of here) next = withExclusion(next, plate.id, w, x.target, flagged.has(wellKey(plate.id, w, x.target)), on)
+    }
     const prev = p.settings.excluded
     void setSettings(p, { excluded: next })
     toast(`${on ? 'Excluded' : 'Included'} ${sel.size} well${sel.size === 1 ? '' : 's'}.`, { undo: () => void setSettings(p, { excluded: prev }) })
@@ -116,7 +123,7 @@ export default function PlateTab({ p, a }: { p: Project; a: Analysis }) {
           <PlateMap plate={plate} settings={p.settings} colorBy={colorBy} selected={sel} flagged={flagged} groupOf={gOf} onWell={onWell} onRange={onRange} label={colorBy === 'target' ? 'target' : 'cq'} size={plate.format === 384 ? 'sm' : 'md'} />
         </div>
         {colorBy === 'cq' ? <CqLegend wells={plate.wells} /> : colorBy === 'role' ? <CatLegend items={roleLegend()} /> : <CatLegend items={(colorBy === 'target' ? targets : groups).map((x, i) => ({ label: x, colour: OKABE_ITO[i % OKABE_ITO.length] }))} />}
-        <p className="muted small">Click a well, shift-click for a range, drag across wells, or click a row letter or column number. Cmd/Ctrl-click adds wells; Esc clears. Hatched wells are excluded; outlined wells are NTC or NRT.</p>
+        <p className="muted small">Click a well, shift-click for a range, drag across wells, or click a row letter or column number. Cmd/Ctrl-click adds wells; Esc clears. Hatched wells are excluded (in a multiplex well, at least one target; hover to see which); outlined wells are NTC or NRT.</p>
       </div>
 
       <div className="grid-2">

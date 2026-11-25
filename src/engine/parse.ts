@@ -182,7 +182,7 @@ export function numberReader(quantities: string[], cqs: string[]) {
 }
 
 export interface ParseOptions { defaultTarget?: string; numbered?: boolean }
-export interface ParseResult { wells: Well[]; issues: Issue[]; format: 96 | 384; skipped: number; /** Wells the instrument software had omitted (QuantStudio Omit, LightCycler Include). */ omitted: string[] }
+export interface ParseResult { wells: Well[]; issues: Issue[]; format: 96 | 384; skipped: number; /** Wells the instrument software had omitted (QuantStudio Omit, LightCycler Include). */ omitted: string[]; /** The same, per reaction: one target of a duplex well can be omitted on its own. */ omittedReactions: { well: string; target: string }[] }
 
 export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: ParseOptions = {}): ParseResult {
   const issues: Issue[] = []
@@ -213,7 +213,7 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
   const header = (rows[headerIndex]?.cells ?? []).map(h => cleanHeader(h).toLowerCase())
   const dyeCol = header.findIndex(h => /^(fluor|reporter|dye)$/.test(h))
   const omitCol = header.indexOf('omit'), includeCol = header.indexOf('include')
-  const omitted: string[] = []
+  const omittedReactions: { well: string; target: string }[] = []
   let emptyWells = 0, dyeAsTarget = false
   const fromName: Well[] = []
   const undecided: string[] = []
@@ -263,7 +263,6 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
     }
     // The quantity column of other wells is the software's own interpolation, not an input.
     if (finalRole !== 'standard') quantity = null
-    if ((omitCol >= 0 && /^true$/i.test(r.cells[omitCol] ?? '')) || (includeCol >= 0 && /^false$/i.test(r.cells[includeCol] ?? ''))) omitted.push(well)
     if (byName) roleFromName.push(`${well} ${sample}`)
     if (!target) noTarget.push(well)
     if (finalRole === 'unknown' && !sample) noSample.push(well)
@@ -272,6 +271,7 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
     const key = `${well}|${target}`
     if (seen.has(key)) { issues.push({ line: r.line, level: 'warn', msg: `Duplicate ${well}${target ? ` / ${target}` : ''} (first seen on line ${seen.get(key)}). Kept the first.` }); skipped++; continue }
     seen.set(key, r.line)
+    if ((omitCol >= 0 && /^true$/i.test(r.cells[omitCol] ?? '')) || (includeCol >= 0 && /^false$/i.test(r.cells[includeCol] ?? ''))) omittedReactions.push({ well, target })
     const group = get(r, 'group')
     wells.push({ well, sample, target, role: finalRole, cq, tm, quantity, ...(group ? { group } : {}) })
     if (named) fromName.push(wells[wells.length - 1])
@@ -291,9 +291,12 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
   if (noTarget.length) issues.push({ line: at, level: 'warn', msg: `No target for ${list(noTarget)}. Assign it in the plate map.` })
   if (noSample.length) issues.push({ line: at, level: 'warn', msg: `No sample name for ${list(noSample)}. Assign it in the plate map.` })
   if (stdNoQty.length) issues.push({ line: at, level: 'warn', msg: `No quantity for ${list(stdNoQty)} marked as standards, so they cannot be used in a standard curve. Enter quantities in the plate map.` })
-  if (omitted.length) issues.push({ line: at, level: 'warn', msg: `${omitted.length} well${omitted.length > 1 ? 's were' : ' was'} omitted in the instrument software (${omitted.slice(0, 6).join(', ')}${omitted.length > 6 ? ', ...' : ''}) and will start excluded.` })
+  const omitted = [...new Set(omittedReactions.map(o => o.well))]
+  // A duplex well may be omitted for one target only.
+  const omittedNames = omittedReactions.map(o => (wells.filter(w => w.well === o.well).length > 1 && o.target ? `${o.well} ${o.target}` : o.well))
+  if (omitted.length) issues.push({ line: at, level: 'warn', msg: `${omittedNames.length} well${omittedNames.length > 1 ? 's were' : ' was'} omitted in the instrument software (${omittedNames.slice(0, 6).join(', ')}${omittedNames.length > 6 ? ', ...' : ''}) and will start excluded.` })
   if (!wells.length) issues.push({ line: at, level: 'error', msg: 'No data rows found under the header.' })
-  return { wells, issues, format: formatFor(wells.map(w => w.well)), skipped, omitted }
+  return { wells, issues, format: formatFor(wells.map(w => w.well)), skipped, omitted, omittedReactions }
 }
 
 // ---------- RDML ----------

@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import { leftOutText, methodsText, miqe } from './engine/qpcr.ts'
+import { leftOutText, methodsText, miqe, wellKey } from './engine/qpcr.ts'
 import { foldFigure } from './figure.ts'
 import { CatLegend, PlateMap, roleLegend } from './PlateMap.tsx'
 import { analysisOf } from './projectData.ts'
@@ -39,7 +39,7 @@ export default function Report({ id }: { id: string }) {
         {p.plates.map(pl => (
           <section key={pl.id} className="avoid-break">
             <h2>Plate map · {pl.name}</h2>
-            <PlateMap plate={pl} settings={p.settings} colorBy="role" flagged={new Set(a.replicates.filter(r => r.plateId === pl.id).flatMap(r => r.wells.filter(w => w.auto).map(w => w.well)))} label="cq" size={pl.format === 384 ? 'sm' : 'md'} />
+            <PlateMap plate={pl} settings={p.settings} colorBy="role" flagged={new Set(a.replicates.filter(r => r.plateId === pl.id).flatMap(r => r.wells.filter(w => w.auto).map(w => wellKey(r.plateId, w.well, r.target))))} label="cq" size={pl.format === 384 ? 'sm' : 'md'} />
             <CatLegend items={roleLegend()} />
           </section>
         ))}
