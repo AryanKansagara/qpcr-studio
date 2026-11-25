@@ -134,13 +134,13 @@ export interface Stability {
   genorm: { steps: GenormStep[]; ranking: string[]; m: Record<string, number>; v: { label: string; v: number }[]; optimal: number; recommended: string[] }
   normfinder: { stability: Record<string, number>; ranking: string[]; groups: number; note?: string } | null
   bestkeeper: Record<string, { sd: number; cv: number; r: number; mean: number }>
-  shift: Record<string, { diff: number; p: number; groupA: string; groupB: string }>
+  shift: Record<string, { diff: number; p: number | null; groupA: string; groupB: string }>
 }
 export interface SampleExpr { sample: string; group: string; dcq: number; log2rel: number }
 export interface Comparison { target: string; group: string; vs: string; na: number; nb: number; log2fc: number; lo: number; hi: number; fold: number; foldLo: number; foldHi: number; p: number | null; stars: string; test: string }
 /** A sample with wells on the plates that has no value for this target, and why. */
 export interface LeftOut { sample: string; group: string; why: string }
-export interface TargetResult { target: string; samples: SampleExpr[]; leftOut: LeftOut[]; groups: { group: string; n: number; meanLog2: number; sdLog2: number }[]; omnibus: { test: string; stat: number; p: number } | null; comparisons: Comparison[]; note?: string }
+export interface TargetResult { target: string; samples: SampleExpr[]; leftOut: LeftOut[]; groups: { group: string; n: number; meanLog2: number; sdLog2: number }[]; omnibus: { test: string; stat: number; p: number | null } | null; comparisons: Comparison[]; note?: string }
 export interface Calib { target: string; plateId: string; offset: number }
 
 export interface Analysis {
@@ -523,11 +523,16 @@ function expression(t: string, refs: string[], samples: string[], gOf: Map<strin
     const o = others[0]
     const w = welch(by(o.group), by(control))
     res.omnibus = { test: 'Welch t', stat: w.stat, p: w.p }
-    res.comparisons.push(mk(o.group, control, o.n, ctrl.length, w.diff, w.lo, w.hi, w.p, `Welch t-test, df ${w.df.toFixed(1)}`))
+    res.comparisons.push(mk(o.group, control, o.n, ctrl.length, w.diff, w.lo, w.hi, w.p, w.p === null ? `Welch t-test${NO_VAR}` : `Welch t-test, df ${w.df.toFixed(1)}`))
     return res
   }
   const a = anova(live.map(g => by(g.group)))
   res.omnibus = { test: 'One-way ANOVA', stat: a.f, p: a.p }
+  if (a.p === null) {
+    const pairs = s.posthoc === 'tukey' ? live.flatMap((B, i) => live.slice(i + 1).map(A => (A.group === control ? [B, A] : [A, B]))) : others.map(o => [o, live.find(g => g.group === control)!])
+    for (const [A, B] of pairs) res.comparisons.push(mk(A.group, B.group, A.n, B.n, A.meanLog2 - B.meanLog2, NaN, NaN, null, `${s.posthoc === 'tukey' ? 'Tukey HSD' : `Dunnett vs ${control}`}${NO_VAR}`))
+    return res
+  }
   if (s.posthoc === 'tukey') {
     const q = qtukey(0.95, live.length, a.df2)
     for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
@@ -551,6 +556,8 @@ function expression(t: string, refs: string[], samples: string[], gOf: Map<strin
   }
   return res
 }
+
+const NO_VAR = ': no p-value, the values within each group do not vary'
 
 export const tCritical = (df: number) => tQuantile(0.975, df)
 

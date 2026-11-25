@@ -13,7 +13,7 @@ const near = (a: number, b: number, tol: number, msg?: string) => assert.ok(Math
 
 test('Welch t-test matches R for (1,2,3) vs (4,5,6)', () => {
   const w = welch([1, 2, 3], [4, 5, 6])
-  near(w.stat, -3.6742, 1e-4); near(w.df, 4, 1e-9); near(w.p, 0.02131, 1e-4)
+  near(w.stat, -3.6742, 1e-4); near(w.df, 4, 1e-9); near(w.p!, 0.02131, 1e-4)
   near(w.lo, -5.267, 1e-3); near(w.hi, -0.733, 1e-3)
 })
 
@@ -24,7 +24,7 @@ test('t quantiles match tables', () => {
 
 test('one-way ANOVA F and p', () => {
   const a = anova([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-  near(a.f, 27, 1e-9); near(a.p, 0.001, 1e-6); assert.equal(a.df2, 6)
+  near(a.f, 27, 1e-9); near(a.p!, 0.001, 1e-6); assert.equal(a.df2, 6)
 })
 
 test('studentised range quantile matches Tukey tables', () => {
@@ -182,7 +182,7 @@ test('three groups: ANOVA with Dunnett vs control, or Tukey all pairs', () => {
   n = 0
   const p = design({ 'C-1': { R: 18, T: 28 }, 'C-2': { R: 18, T: 28.3 }, 'C-3': { R: 18, T: 27.8 }, 'A-1': { R: 18, T: 26 }, 'A-2': { R: 18, T: 26.4 }, 'A-3': { R: 18, T: 25.9 }, 'B-1': { R: 18, T: 28.1 }, 'B-2': { R: 18, T: 27.7 }, 'B-3': { R: 18, T: 28.2 } })
   const d = analyze([p], S({ method: 'livak', refs: ['R'], control: 'C', posthoc: 'dunnett' })).targets[0]
-  assert.equal(d.omnibus!.test, 'One-way ANOVA'); assert.ok(d.omnibus!.p < 0.001)
+  assert.equal(d.omnibus!.test, 'One-way ANOVA'); assert.ok(d.omnibus!.p! < 0.001)
   assert.equal(d.comparisons.length, 2)
   assert.ok(d.comparisons.find(c => c.group === 'A')!.p! < 0.001)
   assert.ok(d.comparisons.find(c => c.group === 'B')!.p! > 0.5)

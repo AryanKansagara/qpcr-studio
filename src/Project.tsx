@@ -142,7 +142,7 @@ function Results({ p, a }: { p: Project; a: Analysis }) {
                 <tr key={t.target + c.group + c.vs}>
                   {i === 0 && <th scope="row" rowSpan={t.comparisons.length}><i>{t.target}</i>{t.omnibus && t.omnibus.test !== 'Welch t' && <div className="muted small">ANOVA p = {fmtP(t.omnibus.p)}</div>}</th>}
                   <td>{c.group} vs {c.vs}</td><td className="num">{c.na} v {c.nb}</td>
-                  <td className="num strong">{fmtFold(c.fold)}</td><td className="num">{fmtFold(c.foldLo)} to {fmtFold(c.foldHi)}</td>
+                  <td className="num strong">{fmtFold(c.fold)}</td><td className="num">{isFinite(c.foldLo) ? `${fmtFold(c.foldLo)} to ${fmtFold(c.foldHi)}` : 'n/a'}</td>
                   <td className="num">{fmtP(c.p)}</td><td className={c.stars === 'ns' ? 'muted' : 'sig'}>{c.stars}</td><td className="small muted">{c.test}</td>
                 </tr>
               )) : [<tr key={t.target}><th scope="row"><i>{t.target}</i></th><td colSpan={7} className="muted small">{t.note}</td></tr>])}
@@ -241,7 +241,7 @@ function Compare({ a, b }: { a: Snapshot; b: Snapshot }) {
           <tbody>{keys.map(k => {
             const [t, g, v] = k.split('|')
             const x = a.results.find(r => `${r.target}|${r.group}|${r.vs}` === k), y = b.results.find(r => `${r.target}|${r.group}|${r.vs}` === k)
-            const flip = x && y && (x.p! < 0.05) !== (y.p! < 0.05)
+            const flip = x && y && x.p !== null && y.p !== null && (x.p < 0.05) !== (y.p < 0.05)
             return <tr key={k} className={flip ? 'flip' : ''}><th scope="row"><i>{t}</i> {g} vs {v}</th><td className="num">{x ? fmtFold(x.fold) : '–'}</td><td className="num">{y ? fmtFold(y.fold) : '–'}</td><td className="num">{x && y ? `${y.fold / x.fold >= 1 ? '+' : ''}${((y.fold / x.fold - 1) * 100).toFixed(0)}%` : ''}</td><td className="num">{fmtP(x?.p)}</td><td className="num">{fmtP(y?.p)}{flip && <span className="tag warn">significance changed</span>}</td></tr>
           })}</tbody>
         </table>

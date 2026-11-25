@@ -31,7 +31,7 @@ export function foldFigure(targets: TargetResult[], o: FigOpts): string {
     const pts = t.samples.filter(s => s.group === g).map(s => s.log2rel)
     const cmp = t.comparisons.find(c => c.group === g && c.vs === o.control)
     let lo = gs.meanLog2, hi = gs.meanLog2
-    if (cmp) { lo = cmp.lo; hi = cmp.hi }
+    if (cmp) { if (isFinite(cmp.lo) && isFinite(cmp.hi)) { lo = cmp.lo; hi = cmp.hi } }
     else if (gs.n > 1) { const h = tQuantile(0.975, gs.n - 1) * gs.sdLog2 / Math.sqrt(gs.n); lo -= h; hi += h }
     bars.push({ target: t.target, group: g, y: gs.meanLog2, lo, hi, pts, stars: cmp?.stars ?? '' })
   }
@@ -71,8 +71,8 @@ export function foldFigure(targets: TargetResult[], o: FigOpts): string {
         s.push(`<rect x="${x}" y="${y1}" width="${barW}" height="${Math.max(1, y2 - y1)}" fill="${c}" fill-opacity="0.85" rx="2"/>`)
       } else s.push(`<line x1="${x + 3}" x2="${x + barW - 3}" y1="${Y(b.y)}" y2="${Y(b.y)}" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`)
       // CI whisker
-      s.push(`<line x1="${cx}" x2="${cx}" y1="${Y(b.hi)}" y2="${Y(b.lo)}" stroke="${ink}" stroke-width="1.2"/>`)
-      s.push(`<line x1="${cx - 6}" x2="${cx + 6}" y1="${Y(b.hi)}" y2="${Y(b.hi)}" stroke="${ink}" stroke-width="1.2"/><line x1="${cx - 6}" x2="${cx + 6}" y1="${Y(b.lo)}" y2="${Y(b.lo)}" stroke="${ink}" stroke-width="1.2"/>`)
+      if (b.hi > b.lo) s.push(`<line x1="${cx}" x2="${cx}" y1="${Y(b.hi)}" y2="${Y(b.lo)}" stroke="${ink}" stroke-width="1.2"/>`)
+      if (b.hi > b.lo) s.push(`<line x1="${cx - 6}" x2="${cx + 6}" y1="${Y(b.hi)}" y2="${Y(b.hi)}" stroke="${ink}" stroke-width="1.2"/><line x1="${cx - 6}" x2="${cx + 6}" y1="${Y(b.lo)}" y2="${Y(b.lo)}" stroke="${ink}" stroke-width="1.2"/>`)
       b.pts.forEach((v, i) => {
         const jx = cx + ((i % 3) - 1) * 6 + (b.pts.length > 3 ? (Math.floor(i / 3) % 2 ? 3 : -3) : 0)
         s.push(`<circle cx="${jx}" cy="${Y(v)}" r="3.4" fill="${o.kind === 'bar' ? (o.bg ?? '#ffffff') : c}" stroke="${o.kind === 'bar' ? ink : (o.bg ?? '#ffffff')}" stroke-width="1"/>`)

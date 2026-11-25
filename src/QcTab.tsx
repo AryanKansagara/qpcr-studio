@@ -170,7 +170,7 @@ export function RefsTab({ p, a }: { p: Project; a: Analysis }) {
             <div>
               <h2 className="h4">Recommendation</h2>
               <p>geNorm ranks <b>{st.genorm.ranking.join(' > ')}</b> (most to least stable){st.normfinder ? <>; NormFinder ranks <b>{st.normfinder.ranking.join(' > ')}</b></> : ''}. Use the geometric mean of <b>{rec.join(' + ')}</b>.</p>
-              {Object.entries(st.shift).filter(([, s]) => Math.abs(s.diff) >= 0.5).map(([g, s]) => <p key={g} className="warn-t small"><i>{g}</i> shifts {s.diff > 0 ? '+' : ''}{s.diff.toFixed(2)} Cq in {s.groupA} vs {s.groupB} (Welch p = {fmtP(s.p)}). A reference gene that responds to treatment biases every fold change.</p>)}
+              {Object.entries(st.shift).filter(([, s]) => Math.abs(s.diff) >= 0.5).map(([g, s]) => <p key={g} className="warn-t small"><i>{g}</i> shifts {s.diff > 0 ? '+' : ''}{s.diff.toFixed(2)} Cq in {s.groupA} vs {s.groupB} ({s.p === null ? 'no p-value, the values do not vary' : `Welch p = ${fmtP(s.p)}`}). A reference gene that responds to treatment biases every fold change.</p>)}
             </div>
             {same ? <span className="tag ok">In use</span> : <button type="button" className="btn primary sm" onClick={() => { const prev = p.settings.refs; void setSettings(p, { refs: rec }); toast(`Normalising to ${rec.join(' + ')}.`, { undo: () => void setSettings(p, { refs: prev }) }) }}>Use {rec.join(' + ')}</button>}
           </div>

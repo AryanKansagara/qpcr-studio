@@ -54,7 +54,7 @@ test.fail('#14 no reference recommendation from one sample', () => {
   expect(a.stability).toBeNull()
 })
 
-test.fail('#15 zero variance gives no p-value', () => {
+test('#15 zero variance gives no p-value', () => {
   const a = analyze(plate1([['C-1', 'R', 18], ['C-1', 'T', 28], ['C-2', 'R', 18], ['C-2', 'T', 28], ['X-1', 'R', 18], ['X-1', 'T', 25], ['X-2', 'R', 18], ['X-2', 'T', 25]]), S({}))
   expect(a.targets[0].comparisons[0].p).toBeNull()
 })

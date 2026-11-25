@@ -88,7 +88,7 @@ export default function Docs() {
           <li><b>Two groups:</b> Welch’s t-test (no equal-variance assumption). The 95% CI of the difference is back-transformed: fold CI = 2^(lower) to 2^(upper).</li>
           <li><b>Three or more groups:</b> one-way ANOVA, then Dunnett vs the control (default) or Tukey HSD for all pairs. CIs are simultaneous (Dunnett or Tukey critical values) and back-transformed.</li>
           <li><b>Nonparametric:</b> Mann-Whitney U vs control, exact when there are no ties and n ≤ 12 per group, Holm-adjusted across comparisons. With n = 3 per group the smallest possible p is 0.10.</li>
-          <li>Stars: * p &lt; 0.05, ** p &lt; 0.01, *** p &lt; 0.001, **** p &lt; 0.0001. Each group needs at least two biological replicates.</li>
+          <li>Stars: * p &lt; 0.05, ** p &lt; 0.01, *** p &lt; 0.001, **** p &lt; 0.0001. Each group needs at least two biological replicates. When no group varies at all there is no p-value or CI.</li>
           <li>Distribution functions (t, F, studentised range, Dunnett’s multivariate t) are computed numerically in the browser and checked against published tables in the test suite.</li>
         </ul>
       </article>
