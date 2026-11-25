@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import { methodsText, miqe } from './engine/qpcr.ts'
+import { leftOutText, methodsText, miqe } from './engine/qpcr.ts'
 import { foldFigure } from './figure.ts'
 import { CatLegend, PlateMap, roleLegend } from './PlateMap.tsx'
 import { analysisOf } from './projectData.ts'
@@ -57,7 +57,7 @@ export default function Report({ id }: { id: string }) {
         {a.curves.length > 0 && <section className="avoid-break"><h2>Standard curves</h2><table className="vt compact"><thead><tr><th>Target</th><th>Slope</th><th>Efficiency</th><th>R²</th><th>Range</th><th>Notes</th></tr></thead><tbody>{a.curves.map(c => <tr key={c.target}><td><i>{c.target}</i></td><td>{c.slope.toFixed(3)}</td><td>{(c.efficiency * 100).toFixed(1)}%</td><td>{c.r2.toFixed(4)}</td><td>{c.decades.toFixed(1)} log</td><td>{c.warnings.join(' ') || 'OK'}</td></tr>)}</tbody></table></section>}
         {a.stability && <section className="avoid-break"><h2>Reference-gene stability</h2><table className="vt compact"><thead><tr><th>Gene</th><th>geNorm M</th><th>NormFinder</th><th>BestKeeper ±Cq</th><th>Treatment shift</th></tr></thead><tbody>{a.stability.genorm.ranking.map(g => <tr key={g}><td><i>{g}</i></td><td>{a.stability!.genorm.m[g].toFixed(3)}</td><td>{a.stability!.normfinder?.stability[g].toFixed(3) ?? '–'}</td><td>{a.stability!.bestkeeper[g].sd.toFixed(2)}</td><td>{a.stability!.shift[g] ? a.stability!.shift[g].diff.toFixed(2) : '–'}</td></tr>)}</tbody></table>
           {a.stability.genorm.v.length > 0 && <p className="small">Pairwise variation: {a.stability.genorm.v.map(v => `${v.label} ${v.v.toFixed(3)}`).join(', ')}.</p>}</section>}
-        {a.targets.length > 0 && <section className="avoid-break"><h2>Results</h2><div className="fig" dangerouslySetInnerHTML={{ __html: fig }} />
+        {a.targets.length > 0 && <section className="avoid-break"><h2>Results</h2>{a.targets.filter(t => t.leftOut.length).map(t => <p key={t.target} className="small">{leftOutText(t)}</p>)}<div className="fig" dangerouslySetInnerHTML={{ __html: fig }} />
           <table className="vt compact"><thead><tr><th>Target</th><th>Comparison</th><th>Fold</th><th>95% CI</th><th>p</th><th>Test</th></tr></thead><tbody>{a.targets.flatMap(t => t.comparisons.map(c => <tr key={t.target + c.group + c.vs}><td><i>{t.target}</i></td><td>{c.group} vs {c.vs}</td><td>{fmtFold(c.fold)}</td><td>{fmtFold(c.foldLo)} to {fmtFold(c.foldHi)}</td><td>{fmtP(c.p)} {c.stars}</td><td>{c.test}</td></tr>))}</tbody></table></section>}
         <section className="avoid-break"><h2>MIQE checklist</h2><table className="vt compact"><tbody>{checklist.map(i => <tr key={i.id}><td>{i.status === 'pass' ? 'Covered' : i.status === 'warn' ? 'Check' : 'Missing'}</td><th>{i.label}</th><td>{i.detail}</td></tr>)}</tbody></table></section>
         <section><h2>Methods</h2><p className="methods">{methodsText(p.plates, p.settings, p.meta, a)}</p></section>

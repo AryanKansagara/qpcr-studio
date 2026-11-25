@@ -10,7 +10,7 @@ const plate = (id: string, wells: Well[]): Plate => ({ id, name: id, format: 96,
 const plate1 = (rows: [string, string, number | null][]) => [plate('p', rows.map(([s, t, c], i) => well(`${'ABCDEFGH'[i / 12 | 0]}${i % 12 + 1}`, s, t, c)))]
 const S = (p: Partial<Settings>): Settings => ({ ...defaultSettings(), method: 'livak', control: 'C', refs: ['R'], ...p })
 
-test.fail('#8 samples left out of a fold change are named', () => {
+test('#8 samples left out of a fold change are named', () => {
   const a = analyze(plate1([['C-1', 'R', 18], ['C-1', 'T', 28], ['C-2', 'R', 18], ['C-2', 'T', 28.2], ['X-1', 'R', 18], ['X-1', 'T', 30], ['X-2', 'R', 18], ['X-2', 'T', 30.1], ['X-3', 'R', 18], ['X-3', 'T', null]]), S({}))
   expect(a.warnings.join(' ')).toContain('X-3')
 })
