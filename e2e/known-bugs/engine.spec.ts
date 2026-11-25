@@ -26,7 +26,7 @@ test.fail('#9 a pasted Cq of 0 is no amplification', async ({ page }) => {
   await expect(page.getByText('No amplification').first()).toBeVisible({ timeout: 10_000 })
 })
 
-test.fail('#10 Mann-Whitney ties survive floating-point noise', () => {
+test('#10 Mann-Whitney ties survive floating-point noise', () => {
   expect(mannWhitney([28.1 - 18, 12, 13], [28.2 - 18.1, 8, 9]).exact).toBe(false)
 })
 
