@@ -146,6 +146,37 @@ export function parseRole(raw: string, sample: string): Role {
   return 'unknown'
 }
 
+const GROUPED = { ',': /^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$/, '.': /^[+-]?\d{1,3}(\.\d{3})+(,\d+)?$/ }
+
+/**
+ * Decides whether a file writes 1,234.5 or 1.234,5 and returns a reader for its numbers (NaN when not a number).
+ * A Cq or Tm is far below 1000, so a lone separator in one is always the decimal mark. A lone separator before exactly
+ * three digits in a quantity ("10,000") takes the other role once the decimal mark is known. A comma that cannot be decided is NaN.
+ */
+export function numberReader(quantities: string[], cqs: string[]) {
+  const all = [...quantities, ...cqs].map(x => x.trim())
+  const uses = (mark: ',' | '.') => {
+    const m = mark === ',' ? ',' : '\\.', o = mark === ',' ? '\\.' : ','
+    const short = new RegExp(`^[+-]?(\\d*${m}(\\d{1,2}|\\d{4,})|\\d{4,}${m}\\d+|0*${m}\\d+|\\d+${m}\\d+e[+-]?\\d+|\\d{1,3}(${o}\\d{3})+${m}\\d+|\\d{1,3}(${o}\\d{3}){2,})$`, 'i')
+    const lone = new RegExp(`^[+-]?\\d+${m}\\d+$`)
+    return all.some(x => short.test(x)) || cqs.some(x => lone.test(x.trim()))
+  }
+  const comma = uses(','), point = uses('.')
+  return (raw: string, cell?: 'quantity') => {
+    const t = raw.trim()
+    let s = t
+    if (cell && GROUPED[','].test(t) && !/^[+-]?0/.test(t) && (point || /,.*[,.]/.test(t))) {
+      if (comma && point && !/,.*[,.]/.test(t)) return NaN
+      s = t.replace(/,/g, '')
+    } else if (cell && GROUPED['.'].test(t) && !/^[+-]?0/.test(t) && comma && (!point || /\..*[.,]/.test(t))) s = t.replace(/\./g, '').replace(',', '.')
+    else if (cell && GROUPED[','].test(t) && !/^[+-]?0/.test(t) && !comma) return NaN
+    else if (GROUPED[','].test(t) && /,.*[,.]/.test(t)) s = t.replace(/,/g, '')
+    else s = t.replace(',', '.')
+    const v = Number(s)
+    return t !== '' && isFinite(v) ? v : NaN
+  }
+}
+
 export interface ParseOptions { defaultTarget?: string; numbered?: boolean }
 export interface ParseResult { wells: Well[]; issues: Issue[]; format: 96 | 384; skipped: number; /** Wells the instrument software had omitted (QuantStudio Omit, LightCycler Include). */ omitted: string[] }
 
@@ -165,16 +196,14 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
     return !next || next.cells.filter(Boolean).length < 3 || /^\[.*\]$/.test(next.cells[0] ?? '')
   })
   const data = end >= 0 ? body.slice(0, end) : body
-  // "5,720.562" and "100,000,000.000" use the comma for thousands (QuantStudio); "18,25" uses it as the decimal mark.
-  const numCols = (['cq', 'quantity', 'tm'] as Field[]).filter(f => m[f] !== undefined)
-  const thousands = data.some(r => numCols.some(f => /\d,\d{3}(\.|,\d{3})/.test(get(r, f))))
-  const num = (s: string) => { const t = s.trim(); const v = Number(thousands ? t.replace(/,/g, '') : t.replace(',', '.')); return t !== '' && isFinite(v) ? v : NaN }
+  const num = numberReader(data.map(r => get(r, 'quantity')), data.flatMap(r => [get(r, 'cq'), get(r, 'tm')]))
   const header = (rows[headerIndex]?.cells ?? []).map(h => cleanHeader(h).toLowerCase())
   const dyeCol = header.findIndex(h => /^(fluor|reporter|dye)$/.test(h))
   const omitCol = header.indexOf('omit'), includeCol = header.indexOf('include')
   const omitted: string[] = []
   let emptyWells = 0, dyeAsTarget = false
   const fromName: Well[] = []
+  const undecided: string[] = []
   const noTarget: string[] = [], noSample: string[] = [], stdNoQty: string[] = []
   const list = (w: string[]) => `${w.length} well${w.length > 1 ? 's' : ''} (${w.slice(0, 6).join(', ')}${w.length > 6 ? ', ...' : ''})`
   const idxMax = Math.max(0, ...data.map(r => num(get(r, 'well'))).filter(isFinite))
@@ -204,7 +233,8 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
     // Multiplex runs exported without target names: the fluorophore tells the assays apart.
     if (!target && dyeCol >= 0 && r.cells[dyeCol]) { target = r.cells[dyeCol]; dyeAsTarget = true }
     const qRaw = get(r, 'quantity'), tmRaw = get(r, 'tm')
-    let quantity = qRaw && isFinite(num(qRaw)) ? num(qRaw) : null
+    let quantity = qRaw && isFinite(num(qRaw, 'quantity')) ? num(qRaw, 'quantity') : null
+    if (qRaw && quantity === null && /^[\d.,]+$/.test(qRaw) && isFinite(Number(qRaw.replace(',', '.')))) undecided.push(`${well} ${qRaw}`)
     const tm = tmRaw && isFinite(num(tmRaw)) ? num(tmRaw) : null
     // Without a role column, a known quantity marks a standard (LightCycler "Standard" column, generic dilution column).
     // LightCycler writes 0 there for every non-standard well.
@@ -240,6 +270,7 @@ export function parseRows(rows: Row[], headerIndex: number, m: Mapping, opts: Pa
     if (qs.length >= 3 && !numbering && qs[qs.length - 1] / qs[0] >= 8) issues.push({ line: at, level: 'warn', msg: `No quantity column: ${fromName.length} standard quantities were read from the sample names (${qs.slice(0, 4).join(', ')}${qs.length > 4 ? ', ...' : ''}). Check them in the plate map.` })
     else for (const w of fromName) { w.quantity = null; stdNoQty.push(w.well) }
   }
+  if (undecided.length) issues.push({ line: at, level: 'warn', msg: `Quantities could be thousands or decimals (${undecided.slice(0, 4).join(', ')}${undecided.length > 4 ? ', ...' : ''}) and were not read. Write them without separators, or enter them in the plate map.` })
   if (noTarget.length) issues.push({ line: at, level: 'warn', msg: `No target for ${list(noTarget)}. Assign it in the plate map.` })
   if (noSample.length) issues.push({ line: at, level: 'warn', msg: `No sample name for ${list(noSample)}. Assign it in the plate map.` })
   if (stdNoQty.length) issues.push({ line: at, level: 'warn', msg: `No quantity for ${list(stdNoQty)} marked as standards, so they cannot be used in a standard curve. Enter quantities in the plate map.` })
