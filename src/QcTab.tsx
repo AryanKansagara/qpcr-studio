@@ -65,7 +65,7 @@ export default function QcTab({ p, a }: { p: Project; a: Analysis }) {
 
       <div className="card pad">
         <h2 className="h4">NTC and no-RT controls</h2>
-        <p className="muted small">An NTC fails when it amplifies within {p.settings.ntcWindow} cycles of the latest sample for that assay; a no-RT fails within {p.settings.ntcWindow} cycles of the matching RT+ sample. A Tm more than 2 °C from the product suggests primer-dimer.</p>
+        <p className="muted small">An NTC fails when it amplifies within {p.settings.ntcWindow} cycles of the latest sample for that assay (the latest standard when there are no samples); a no-RT fails within {p.settings.ntcWindow} cycles of the matching RT+ sample. A Tm more than 2 °C from the product suggests primer-dimer.</p>
         {a.contamination.length ? (
           <ul className="checks">{a.contamination.map(c => (
             <li key={c.plateId + c.well + c.target} className={c.status === 'pass' ? 'ok' : c.status === 'fail' ? 'bad' : 'info'}>

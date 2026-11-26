@@ -97,7 +97,7 @@ export default function Docs() {
         <h2>QC rules and defaults</h2>
         <ul>
           <li><b>Outlier replicate:</b> with 3+ technical replicates, if the SD exceeds 0.3 cycles the well furthest from the median is flagged and excluded. Alternative: Grubbs test at alpha 0.05 (at n = 3 Grubbs can only flag extreme wells). Every flag can be overridden.</li>
-          <li><b>NTC:</b> fails if it amplifies within 5 cycles of the latest sample for that assay (about 3% of the signal or more). Late NTC signal is noted. A Tm more than 2 °C from the product suggests primer-dimer and downgrades a failure to a warning.</li>
+          <li><b>NTC:</b> fails if it amplifies within 5 cycles of the latest sample for that assay, or of the latest standard when the assay has no samples (about 3% of the signal or more). Late NTC signal is noted. A Tm more than 2 °C from the product suggests primer-dimer and downgrades a failure to a warning.</li>
           <li><b>No-RT:</b> fails within 5 cycles of the matching RT+ sample; the estimated gDNA share (2^−gap) is shown.</li>
           <li><b>Melt:</b> any well with Tm more than ±1 °C from the assay median.</li>
           <li><b>MIQE:</b> a subset of the essential items from Bustin et al., Clinical Chemistry 2009, and MIQE 2.0 (2025): design, RNA quality, RT, primers and amplicons, efficiency, controls, specificity, instrument, replicates, reference validation and statistics.</li>
