@@ -35,6 +35,7 @@ npm install
 npm run dev      # http://localhost:5173
 npm test         # engine tests (node --test)
 npm run build
+npm run test:e2e # Playwright on the production build (npx playwright install chromium once; E2E_PORT picks the port)
 ```
 
 Optional sync needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env`; without them everything works locally.

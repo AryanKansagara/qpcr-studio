@@ -85,9 +85,13 @@ export const wellFromIndex = (i: number, f: 96 | 384) => { const { cols } = plat
 export const formatFor = (wells: string[]): 96 | 384 => wells.some(w => { const p = parseWell(w); return !!p && (p.row > 7 || p.col > 11) }) ? 384 : 96
 export const wellKey = (plateId: string, well: string) => `${plateId}|${well}`
 
-/** "Treated-2", "Treated_2", "Treated 2", "Treated rep2" -> "Treated". */
+/** "Treated-2", "Treated_2", "Treated 2", "Treated rep2" -> "Treated"; "LPS_6h" stays as it is. */
 export function guessGroup(sample: string) {
-  const g = sample.replace(/[\s_\-.]*(rep|r|bio|br|n|#)?[\s_\-.]*\d+[a-z]?$/i, '').trim()
+  // "Ctrl 0.5" ends in a dose.
+  if (/(^|\D)0\.\d+$/.test(sample)) return sample
+  // A number may carry a replicate letter (1a). Other letters are units (6h, 2d, 5g, 37C) and tell conditions apart.
+  // A word before the number is a replicate marker only when it stands alone, or after capitals (WTr1), so Tumor1 keeps its r.
+  const g = sample.replace(/((^|[\s_\-.]+)([Rr][Ee][Pp]|[Bb][Ii][Oo]|[Bb]?[Rr]|[Nn])|[Rr][Ee][Pp]|(?<=[A-Z])(b?r|n)|[\s_\-.]*#)?[\s_\-.]*\d+[abcefABEF]?$/, '').trim()
   return g || sample
 }
 
